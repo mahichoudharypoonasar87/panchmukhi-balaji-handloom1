@@ -1,0 +1,68 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) &&
+        firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+
+    function isValidImage() {
+      return request.resource.contentType.matches('image/.*') &&
+        request.resource.size < 10 * 1024 * 1024; // 10MB max
+    }
+
+    function isValidFile() {
+      return request.resource.size < 10 * 1024 * 1024; // 10MB max
+    }
+
+    // Product images — admins only write, anyone reads
+    match /products/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidImage();
+    }
+
+    // Banner images — admins only write, anyone reads
+    match /banners/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidImage();
+    }
+
+    // Category images — admins only write, anyone reads
+    match /categories/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidImage();
+    }
+
+    // Settings assets (logo, favicon) — admins only
+    match /settings/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidImage();
+    }
+
+    // User avatars — owners can write their own, anyone reads
+    match /avatars/{userId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAuthenticated() &&
+        request.auth.uid == userId &&
+        isValidImage();
+    }
+
+    // Review images — authenticated users can upload, anyone reads
+    match /reviews/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAuthenticated() && isValidImage();
+    }
+
+    // Default deny
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
