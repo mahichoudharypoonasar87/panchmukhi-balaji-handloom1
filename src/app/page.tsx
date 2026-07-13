@@ -8,19 +8,22 @@ import TrendingProducts from "@/components/home/TrendingProducts";
 import OfferBanner from "@/components/home/OfferBanner";
 import CustomerReviews from "@/components/home/CustomerReviews";
 import AboutStore from "@/components/home/AboutStore";
-import { getCategories, getTrendingProducts, getBestSellers, getFeaturedProducts } from "@/lib/firebase/firestore";
 import ProductCardSkeleton from "@/components/ui/ProductCardSkeleton";
 
 export const metadata: Metadata = {
   title: "Premium Rajasthani Handloom Sarees & Textiles",
   description:
-    "Discover authentic handloom sarees, cotton fabrics, silk collections, and traditional Rajasthani textiles at Panchmukhi Balaji Handloom, Poonasar.",
+    "Discover authentic Rajasthani handloom sarees, cotton fabrics, silk collections, and traditional Rajasthani textiles at Panchmukhi Balaji Handloom, Poonasar.",
 };
 
-// Revalidate page every 5 minutes
+// Revalidate every 5 minutes via ISR (avoids build-time Firebase calls failing)
 export const revalidate = 300;
 
 async function HomeContent() {
+  // Lazy-import Firebase functions so they're never bundled in build-time static code
+  const { getCategories, getTrendingProducts, getBestSellers, getFeaturedProducts } =
+    await import("@/lib/firebase/firestore");
+
   const [categories, trendingProducts, bestSellers, featuredProducts] =
     await Promise.all([
       getCategories().catch(() => []),
