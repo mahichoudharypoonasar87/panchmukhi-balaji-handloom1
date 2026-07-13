@@ -1,4 +1,4 @@
-import { initializeApp, getApps, getApp } from "firebase/app";
+import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import type { Auth } from "firebase/auth";
@@ -13,43 +13,45 @@ const firebaseConfig = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
-// Initialize Firebase app (this is safe — does NOT validate the API key)
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+// Initialize Firebase app (safe — does NOT validate the API key on init)
+const app: FirebaseApp =
+  getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Firestore & Storage initialize safely (no API key validation at init time)
+// Firestore & Storage — safe to initialize at module level
 export const db = getFirestore(app);
 export const storage = getStorage(app);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AUTH — lazy initialization
 //
-// Firebase 11 validates the API key when getAuth(app) is called, and throws
-// `auth/invalid-api-key` if the key is a placeholder (e.g. during Vercel's
-// build-time static generation when env vars haven't been injected yet, or
-// when running with demo keys locally).
+// Firebase 11 validates the API key inside getAuth(app) immediately, and throws
+// `auth/invalid-api-key` if the key is invalid/placeholder (e.g. during
+// Vercel's build-time static generation before real env vars are injected).
 //
-// Solution: defer getAuth() until it is actually needed at runtime.
-// All server-side code paths (sitemap, ISR pages) never call auth directly,
-// so this is safe.
+// Fix: never call getAuth() at module-import time. Defer it to the first
+// runtime call (browser or server request), where real credentials exist.
 // ─────────────────────────────────────────────────────────────────────────────
 let _auth: Auth | null = null;
 
 export function getFirebaseAuth(): Auth {
   if (!_auth) {
-    // Dynamic require so this code path is never executed at module-import time
+    // Use require() so this import is NOT executed at module load time.
+    // `FirebaseApp` is used as the param type to avoid the self-referencing
+    // `typeof app` that caused "referenced directly in its own type" TS error.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getAuth } = require("firebase/auth") as { getAuth: (app: typeof app) => Auth };
+    const { getAuth } = require("firebase/auth") as {
+      getAuth: (app: FirebaseApp) => Auth;
+    };
     _auth = getAuth(app);
   }
   return _auth;
 }
 
 /**
- * `auth` — same lazy getter exposed as a named export for backward compat.
+ * `auth` — lazy Proxy for backward-compatible `import { auth } from "./config"`.
  *
- * Usage in client components / server action contexts:
- *   import { auth } from "@/lib/firebase/config"
- *   onAuthStateChanged(auth, ...)   // works because the Proxy defers the call
+ * The Proxy defers all property access to getFirebaseAuth() which is only
+ * called at runtime (never at build time), so it never crashes during `next build`.
  */
 export const auth = new Proxy({} as Auth, {
   get(_target, prop: string | symbol) {
@@ -68,7 +70,7 @@ export const getAnalyticsInstance = async () => {
     const { getAnalytics, isSupported } = await import("firebase/analytics");
     if (await isSupported()) return getAnalytics(app);
   } catch {
-    // Analytics not supported in this environment
+    // Not supported in this environment
   }
   return null;
 };
