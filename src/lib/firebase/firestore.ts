@@ -586,36 +586,66 @@ export const updateOrderStatus = async (
   note?: string,
   updatedBy?: string
 ): Promise<void> => {
-  const snap = await getDoc(doc(db, "orders", orderId));
-  if (!snap.exists()) return;
-  const existing = snap.data() as Order;
-  const timeline = [
-    ...(existing.timeline || []),
-    { status, timestamp: new Date(), note, updatedBy },
-  ];
-  await updateDoc(doc(db, "orders", orderId), {
-    status,
-    timeline,
-    updatedAt: serverTimestamp(),
-  });
+  try {
+    const snap = await getDoc(doc(db, "orders", orderId));
+    if (!snap.exists()) {
+      console.warn("[updateOrderStatus] order not found:", orderId);
+      return;
+    }
+ 
+    const existing = snap.data() as Order;
+ 
+    // Build timeline entry — omit undefined fields Firestore would reject
+    const timelineEntry: Record<string, unknown> = {
+      status,
+      timestamp: new Date().toISOString(),
+    };
+    if (note)      timelineEntry.note      = note;
+    if (updatedBy) timelineEntry.updatedBy = updatedBy;
+ 
+    const timeline = [...(existing.timeline || []), timelineEntry];
+ 
+    await updateDoc(doc(db, "orders", orderId), {
+      status,
+      timeline,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (err) {
+    console.error("[updateOrderStatus] error:", err);
+    throw err; // re-throw so the UI can show an error
+  }
 };
 
-export const trackOrder = async (orderNumber: string, phone: string): Promise<Order | null> => {
+export const trackOrder = async (
+  orderNumber: string,
+  phone: string
+): Promise<Order | null> => {
   try {
+    // Query only by orderNumber — no composite index needed
     const snap = await getDocs(
       query(
         collection(db, "orders"),
-        where("orderNumber", "==", orderNumber),
-        where("customerPhone", "==", phone),
+        where("orderNumber", "==", orderNumber.trim().toUpperCase()),
         limit(1)
       )
     );
+ 
     if (snap.empty) return null;
-    return {
+ 
+    const order = {
       id: snap.docs[0].id,
       ...convertTimestamp(snap.docs[0].data() as Record<string, unknown>),
     } as Order;
-  } catch {
+ 
+    // Verify phone in JavaScript (avoids need for composite index)
+    const savedPhone = (order.customerPhone || "").replace(/\s/g, "");
+    const inputPhone  = phone.trim().replace(/\s/g, "");
+ 
+    if (savedPhone !== inputPhone) return null;
+ 
+    return order;
+  } catch (err) {
+    console.error("[trackOrder] error:", err);
     return null;
   }
 };
@@ -779,18 +809,20 @@ export const getDashboardStats = async () => {
       getDocs(collection(db, "orders")),
       getDocs(collection(db, "users")),
     ]);
-
+ 
     const orders = ordersSnap.docs.map((d) => {
       const data = d.data();
       return {
+        id: d.id,                                          // ← THIS WAS MISSING
         ...data,
         createdAt: data.createdAt?.toDate?.() || new Date(),
+        updatedAt: data.updatedAt?.toDate?.() || new Date(),
       } as Order;
     });
-
+ 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-
+ 
     return {
       totalUsers: usersSnap.size,
       totalOrders: orders.length,
@@ -798,19 +830,28 @@ export const getDashboardStats = async () => {
         .filter((o) => o.status !== "cancelled")
         .reduce((s, o) => s + (o.total || 0), 0),
       todaySales: orders
-        .filter((o) => new Date(o.createdAt) >= today && o.status !== "cancelled")
+        .filter(
+          (o) =>
+            new Date(o.createdAt) >= today && o.status !== "cancelled"
+        )
         .reduce((s, o) => s + (o.total || 0), 0),
-      pendingOrders: orders.filter((o) => o.status === "pending").length,
+      pendingOrders:   orders.filter((o) => o.status === "pending").length,
       cancelledOrders: orders.filter((o) => o.status === "cancelled").length,
       deliveredOrders: orders.filter((o) => o.status === "delivered").length,
       recentOrders: orders
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        )
         .slice(0, 10),
     };
-  } catch {
+  } catch (err) {
+    console.error("[getDashboardStats] error:", err);
     return {
       totalUsers: 0, totalOrders: 0, totalRevenue: 0, todaySales: 0,
-      pendingOrders: 0, cancelledOrders: 0, deliveredOrders: 0, recentOrders: [],
+      pendingOrders: 0, cancelledOrders: 0, deliveredOrders: 0,
+      recentOrders: [],
     };
   }
 };
+ 
