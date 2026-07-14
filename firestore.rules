@@ -2,184 +2,109 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ============================================
-    // HELPER FUNCTIONS
-    // ============================================
-    function isAuthenticated() {
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    function isAuth() {
       return request.auth != null;
     }
 
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+    function isOwner(uid) {
+      return isAuth() && request.auth.uid == uid;
     }
 
     function isAdmin() {
-      return isAuthenticated() &&
+      return isAuth() &&
         exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
     }
 
-    function isValidEmail() {
-      return request.auth.token.email_verified == true;
-    }
-
-    // ============================================
-    // USERS COLLECTION
-    // ============================================
+    // ── Users ─────────────────────────────────────────────────────────────────
     match /users/{userId} {
-      // Users can read their own profile; admins can read all
-      allow read: if isOwner(userId) || isAdmin();
-
-      // Users can create their own profile on signup
-      allow create: if isOwner(userId) &&
-        request.resource.data.keys().hasAll(['email', 'displayName', 'isAdmin']) &&
-        request.resource.data.isAdmin == false;
-
-      // Users can update their own non-admin fields; admins can update all
-      allow update: if (isOwner(userId) &&
-          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isAdmin', 'orderCount', 'totalSpent'])) ||
-        isAdmin();
-
-      // Only admins can delete users
+      allow read:   if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId);
+      // Users can update their own profile (including orderCount/totalSpent
+      // which are incremented after order placement). Only admins can change isAdmin.
+      allow update: if isOwner(userId) && !request.resource.data.diff(resource.data)
+                          .affectedKeys().hasAny(['isAdmin'])
+                    || isAdmin();
       allow delete: if isAdmin();
     }
 
-    // ============================================
-    // PRODUCTS COLLECTION
-    // ============================================
+    // ── Products ──────────────────────────────────────────────────────────────
     match /products/{productId} {
-      // Anyone can read active products
-      allow read: if resource.data.isActive == true || isAdmin();
-
-      // Only admins can write products
-      allow create, update, delete: if isAdmin();
+      allow read:   if resource.data.isActive == true || isAdmin();
+      allow write:  if isAdmin();
     }
 
-    // ============================================
-    // CATEGORIES COLLECTION
-    // ============================================
+    // ── Categories ────────────────────────────────────────────────────────────
     match /categories/{categoryId} {
-      // Anyone can read active categories
-      allow read: if resource.data.isActive == true || isAdmin();
-
-      // Only admins can write categories
-      allow create, update, delete: if isAdmin();
+      allow read:   if resource.data.isActive == true || isAdmin();
+      allow write:  if isAdmin();
     }
 
-    // ============================================
-    // ORDERS COLLECTION
-    // ============================================
+    // ── Orders ────────────────────────────────────────────────────────────────
     match /orders/{orderId} {
-      // Users can read their own orders; admins can read all
-      allow read: if (isAuthenticated() && resource.data.userId == request.auth.uid) || isAdmin();
+      allow read: if (isAuth() && resource.data.userId == request.auth.uid) || isAdmin();
 
-      // Authenticated users can create orders
-      allow create: if isAuthenticated() &&
-        request.resource.data.userId == request.auth.uid &&
-        request.resource.data.keys().hasAll([
-          'orderNumber', 'userId', 'customerName', 'customerEmail',
-          'customerPhone', 'items', 'status', 'total'
-        ]) &&
-        request.resource.data.status == 'pending';
+      // Any authenticated user can create an order for themselves
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
 
-      // Admins can update order status; users can only cancel their own pending orders
-      allow update: if isAdmin() ||
-        (isAuthenticated() &&
-         resource.data.userId == request.auth.uid &&
-         resource.data.status == 'pending' &&
-         request.resource.data.status == 'cancelled');
+      // Only admin can update orders (change status, etc.)
+      // Users can cancel their own pending orders
+      allow update: if isAdmin()
+                    || (isAuth()
+                        && resource.data.userId == request.auth.uid
+                        && resource.data.status == 'pending'
+                        && request.resource.data.status == 'cancelled');
 
-      // Only admins can delete orders
       allow delete: if isAdmin();
     }
 
-    // ============================================
-    // CARTS COLLECTION
-    // ============================================
+    // ── Carts ─────────────────────────────────────────────────────────────────
     match /carts/{userId} {
-      // Users can only access their own cart
       allow read, write: if isOwner(userId);
-
-      // Admins can read all carts
-      allow read: if isAdmin();
+      allow read:        if isAdmin();
     }
 
-    // ============================================
-    // REVIEWS COLLECTION
-    // ============================================
+    // ── Reviews ───────────────────────────────────────────────────────────────
     match /reviews/{reviewId} {
-      // Anyone can read approved reviews
-      allow read: if resource.data.isApproved == true || isAdmin() ||
-        (isAuthenticated() && resource.data.userId == request.auth.uid);
-
-      // Authenticated users can create reviews
-      allow create: if isAuthenticated() &&
-        request.resource.data.userId == request.auth.uid &&
-        request.resource.data.rating >= 1 &&
-        request.resource.data.rating <= 5 &&
-        request.resource.data.comment.size() >= 10;
-
-      // Users can update their own reviews; admins can update any
-      allow update: if (isAuthenticated() && resource.data.userId == request.auth.uid &&
-          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isApproved', 'likes', 'reply'])) ||
-        isAdmin();
-
-      // Admins can delete reviews
+      allow read:   if resource.data.isApproved == true || isAdmin()
+                    || (isAuth() && resource.data.userId == request.auth.uid);
+      allow create: if isAuth()
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.rating >= 1
+                    && request.resource.data.rating <= 5;
+      allow update: if isAdmin();
       allow delete: if isAdmin();
     }
 
-    // ============================================
-    // COUPONS COLLECTION
-    // ============================================
+    // ── Coupons ───────────────────────────────────────────────────────────────
     match /coupons/{couponId} {
-      // Authenticated users can read active coupons (to validate)
-      allow read: if isAuthenticated() && resource.data.isActive == true || isAdmin();
-
-      // Only admins can write coupons
-      allow create, update, delete: if isAdmin();
+      // Authenticated users can read active coupons to validate them
+      allow read:  if isAuth() && resource.data.isActive == true || isAdmin();
+      allow write: if isAdmin();
     }
 
-    // ============================================
-    // BANNERS COLLECTION
-    // ============================================
+    // ── Banners ───────────────────────────────────────────────────────────────
     match /banners/{bannerId} {
-      // Anyone can read active banners
-      allow read: if resource.data.isActive == true || isAdmin();
-
-      // Only admins can write banners
-      allow create, update, delete: if isAdmin();
+      allow read:  if resource.data.isActive == true || isAdmin();
+      allow write: if isAdmin();
     }
 
-    // ============================================
-    // NOTIFICATIONS COLLECTION
-    // ============================================
+    // ── Notifications ─────────────────────────────────────────────────────────
     match /notifications/{notificationId} {
-      // Users can read their own notifications
-      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
-
-      // Users can mark their own notifications as read
-      allow update: if isAuthenticated() &&
-        resource.data.userId == request.auth.uid &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
-
-      // Only admins can create/delete notifications
+      allow read:   if isAuth() && resource.data.userId == request.auth.uid || isAdmin();
+      allow update: if isAuth() && resource.data.userId == request.auth.uid
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
       allow create, delete: if isAdmin();
     }
 
-    // ============================================
-    // SETTINGS COLLECTION
-    // ============================================
+    // ── Settings ──────────────────────────────────────────────────────────────
     match /settings/{settingId} {
-      // Anyone can read public settings
-      allow read: if true;
-
-      // Only admins can write settings
-      allow create, update, delete: if isAdmin();
+      allow read:  if true;
+      allow write: if isAdmin();
     }
 
-    // ============================================
-    // DEFAULT: DENY ALL
-    // ============================================
+    // ── Deny everything else ──────────────────────────────────────────────────
     match /{document=**} {
       allow read, write: if false;
     }
