@@ -168,7 +168,6 @@ export default function CheckoutPage() {
         status: "pending" as const,
         paymentMethod: data.paymentMethod,
         paymentStatus: "pending" as const,
-        paymentId: null,
         subtotal: cart.subtotal ?? 0,
         discount: cart.discount ?? 0,
         couponCode: cart.couponCode || null,
@@ -177,8 +176,6 @@ export default function CheckoutPage() {
         gst: cart.gst ?? 0,
         total: cart.total ?? 0,
         orderNotes: data.orderNotes || null,
-        trackingNumber: null,
-        cancelReason: null,
         timeline: [
           {
             status: "pending",
@@ -191,7 +188,7 @@ export default function CheckoutPage() {
       };
 
       // ── Save to Firestore ──────────────────────────────────────────────────
-      const orderId = await createOrder(orderPayload as Parameters<typeof createOrder>[0]);
+      const orderId = await createOrder(orderPayload as unknown as Parameters<typeof createOrder>[0]);
 
       // ── Clear cart ────────────────────────────────────────────────────────
       await clearCart();
