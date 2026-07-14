@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { motion } from "framer-motion";
 import {
   MapPin, Phone, Mail, User, FileText,
   MessageCircle, Truck, CheckCircle, ArrowLeft, Lock
@@ -38,7 +37,7 @@ export default function CheckoutPage() {
   const { cart, clearCart } = useCart();
   const [placing, setPlacing] = useState(false);
   const [orderPlaced, setOrderPlaced] = useState<string | null>(null);
-  const whatsappNumber = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || "91XXXXXXXXXX";
+  const whatsappNumber = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || "919999999999";
 
   const {
     register,
@@ -93,17 +92,13 @@ export default function CheckoutPage() {
     );
   }
 
-  // Order Success Screen
+  // Order success screen
   if (orderPlaced) {
     return (
       <>
         <Navbar />
         <main className="min-h-screen pt-20 flex items-center justify-center bg-[var(--background)]">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="text-center p-8 max-w-md"
-          >
+          <div className="text-center p-8 max-w-md">
             <div className="w-20 h-20 rounded-full bg-green-500/20 border-2 border-green-500 flex items-center justify-center mx-auto mb-5">
               <CheckCircle size={40} className="text-green-500" />
             </div>
@@ -114,7 +109,7 @@ export default function CheckoutPage() {
               Order #{orderPlaced}
             </p>
             <p className="text-[var(--muted)] font-body text-sm mb-6">
-              Thank you for your order. We'll confirm it shortly via WhatsApp.
+              Thank you! We'll confirm your order shortly.
             </p>
             <div className="flex flex-col gap-3">
               <Link href="/profile/orders" className="btn-gold w-full text-center">
@@ -124,7 +119,7 @@ export default function CheckoutPage() {
                 Continue Shopping
               </Link>
             </div>
-          </motion.div>
+          </div>
         </main>
         <Footer />
       </>
@@ -138,7 +133,23 @@ export default function CheckoutPage() {
     try {
       const orderNumber = generateOrderNumber();
 
-      const order = {
+      // ── Build order items (no undefined values) ────────────────────────────
+      const orderItems = cart.items.map((item) => ({
+        productId: item.productId,
+        productName: item.productName,
+        productImage: item.productImage || "",
+        variantId: item.variantId || null,
+        size: item.size || null,
+        color: item.color || null,
+        price: item.price,
+        mrp: item.mrp,
+        quantity: item.quantity,
+        total: item.price * item.quantity,
+      }));
+
+      // ── Build the full order object — NO undefined values ──────────────────
+      // Firestore rejects documents with undefined fields. Use null explicitly.
+      const orderPayload = {
         orderNumber,
         userId: user.uid,
         customerName: data.name,
@@ -151,41 +162,41 @@ export default function CheckoutPage() {
           city: data.city,
           state: data.state,
           pincode: data.pincode,
-          country: data.country,
+          country: data.country || "India",
         },
-        items: cart.items.map((item) => ({
-          productId: item.productId,
-          productName: item.productName,
-          productImage: item.productImage,
-          variantId: item.variantId,
-          size: item.size,
-          color: item.color,
-          price: item.price,
-          mrp: item.mrp,
-          quantity: item.quantity,
-          total: item.price * item.quantity,
-        })),
+        items: orderItems,
         status: "pending" as const,
         paymentMethod: data.paymentMethod,
         paymentStatus: "pending" as const,
-        subtotal: cart.subtotal,
-        discount: cart.discount,
-        couponCode: cart.couponCode,
-        couponDiscount: cart.couponDiscount,
-        shippingCharge: cart.shippingCharge,
-        gst: cart.gst,
-        total: cart.total,
-        orderNotes: data.orderNotes,
+        paymentId: null,
+        subtotal: cart.subtotal ?? 0,
+        discount: cart.discount ?? 0,
+        couponCode: cart.couponCode || null,
+        couponDiscount: cart.couponDiscount ?? 0,
+        shippingCharge: cart.shippingCharge ?? 0,
+        gst: cart.gst ?? 0,
+        total: cart.total ?? 0,
+        orderNotes: data.orderNotes || null,
+        trackingNumber: null,
+        cancelReason: null,
         timeline: [
-          { status: "pending" as const, timestamp: new Date(), note: "Order placed" },
+          {
+            status: "pending",
+            timestamp: new Date().toISOString(), // string, not Date — avoids serialization issues
+            note: "Order placed by customer",
+            updatedBy: "customer",
+          },
         ],
         isReviewed: false,
       };
 
-      const orderId = await createOrder(order);
+      // ── Save to Firestore ──────────────────────────────────────────────────
+      const orderId = await createOrder(orderPayload as Parameters<typeof createOrder>[0]);
+
+      // ── Clear cart ────────────────────────────────────────────────────────
       await clearCart();
 
-      // WhatsApp redirect
+      // ── Open WhatsApp if selected ─────────────────────────────────────────
       if (data.paymentMethod === "whatsapp") {
         const waMessage = generateWhatsAppMessage({
           orderNumber,
@@ -210,14 +221,19 @@ export default function CheckoutPage() {
           paymentMethod: data.paymentMethod,
           notes: data.orderNotes,
         });
-        setTimeout(() => openWhatsApp(whatsappNumber, waMessage), 500);
+        setTimeout(() => openWhatsApp(whatsappNumber, waMessage), 600);
       }
 
       setOrderPlaced(orderNumber);
       toast.success("Order placed successfully!");
-    } catch (err) {
-      console.error(err);
-      toast.error("Failed to place order. Please try again.");
+    } catch (err: unknown) {
+      console.error("Order failed:", err);
+      // Show the actual Firebase error to help debug
+      const msg =
+        err instanceof Error ? err.message : "Failed to place order. Please try again.";
+      toast.error(msg.includes("Missing or insufficient permissions")
+        ? "Permission error — please update Firestore rules (see README step 18)"
+        : msg.slice(0, 120));
     } finally {
       setPlacing(false);
     }
@@ -242,7 +258,7 @@ export default function CheckoutPage() {
 
           <form onSubmit={handleSubmit(onSubmit)}>
             <div className="grid lg:grid-cols-3 gap-8">
-              {/* Left: Form */}
+              {/* ── Left: Form ── */}
               <div className="lg:col-span-2 space-y-6">
                 {/* Customer Details */}
                 <div className="p-6 rounded-3xl bg-[var(--card-bg)] border border-[var(--border)]">
@@ -272,7 +288,7 @@ export default function CheckoutPage() {
                         <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
                         <input
                           {...register("phone")}
-                          placeholder="10-digit mobile number"
+                          placeholder="10-digit mobile"
                           className="input-luxury pl-9"
                           maxLength={10}
                         />
@@ -309,11 +325,11 @@ export default function CheckoutPage() {
                   <div className="grid sm:grid-cols-2 gap-4">
                     <div className="sm:col-span-2">
                       <label className="text-[var(--foreground)] text-xs font-utility font-semibold uppercase tracking-wide block mb-1.5">
-                        Address (House No, Street, Area) *
+                        Full Address *
                       </label>
                       <textarea
                         {...register("address")}
-                        placeholder="Enter your complete address"
+                        placeholder="House No, Street, Area, Landmark"
                         rows={2}
                         className="input-luxury resize-none"
                       />
@@ -325,11 +341,7 @@ export default function CheckoutPage() {
                       <label className="text-[var(--foreground)] text-xs font-utility font-semibold uppercase tracking-wide block mb-1.5">
                         City *
                       </label>
-                      <input
-                        {...register("city")}
-                        placeholder="City"
-                        className="input-luxury"
-                      />
+                      <input {...register("city")} placeholder="City" className="input-luxury" />
                       {errors.city && (
                         <p className="text-crimson-400 text-xs mt-1">{errors.city.message}</p>
                       )}
@@ -390,7 +402,7 @@ export default function CheckoutPage() {
                         desc: "Place order on WhatsApp — quick & easy",
                         icon: MessageCircle,
                         color: "text-green-500",
-                        border: "border-green-500/40 bg-green-500/5",
+                        activeBorder: "border-green-500/40 bg-green-500/5",
                       },
                       {
                         value: "cod",
@@ -398,15 +410,15 @@ export default function CheckoutPage() {
                         desc: "Pay when you receive your order",
                         icon: Truck,
                         color: "text-gold-500",
-                        border: "border-gold-500/40 bg-gold-500/5",
+                        activeBorder: "border-gold-500/40 bg-gold-500/5",
                       },
-                    ].map(({ value, label, desc, icon: Icon, color, border }) => (
+                    ].map(({ value, label, desc, icon: Icon, color, activeBorder }) => (
                       <label
                         key={value}
                         className={cn(
                           "flex items-start gap-3 p-4 rounded-2xl border-2 cursor-pointer transition-all",
                           paymentMethod === value
-                            ? border
+                            ? activeBorder
                             : "border-[var(--border)] hover:border-[var(--muted)]"
                         )}
                       >
@@ -423,9 +435,7 @@ export default function CheckoutPage() {
                               {label}
                             </span>
                           </div>
-                          <p className="text-[var(--muted)] text-xs font-body mt-0.5">
-                            {desc}
-                          </p>
+                          <p className="text-[var(--muted)] text-xs font-body mt-0.5">{desc}</p>
                         </div>
                       </label>
                     ))}
@@ -440,14 +450,14 @@ export default function CheckoutPage() {
                   </h2>
                   <textarea
                     {...register("orderNotes")}
-                    placeholder="Any special instructions, preferred delivery time, gifting message..."
+                    placeholder="Special instructions, gift message, preferred delivery time..."
                     rows={3}
                     className="input-luxury resize-none"
                   />
                 </div>
               </div>
 
-              {/* Right: Summary */}
+              {/* ── Right: Summary ── */}
               <div className="lg:col-span-1">
                 <div className="sticky top-24 rounded-3xl bg-[var(--card-bg)] border border-[var(--border)] overflow-hidden">
                   <div className="p-5 border-b border-[var(--border)]">
@@ -487,24 +497,39 @@ export default function CheckoutPage() {
                       ))}
                     </div>
 
+                    {/* Price breakdown */}
                     <div className="border-t border-[var(--border)] pt-3 space-y-2">
-                      {[
-                        { label: "Subtotal", value: formatCurrency(cart.subtotal) },
-                        cart.discount > 0 && { label: "Discount", value: `−${formatCurrency(cart.discount)}`, green: true },
-                        { label: "GST (5%)", value: formatCurrency(cart.gst) },
-                        { label: "Shipping", value: cart.shippingCharge === 0 ? "FREE" : formatCurrency(cart.shippingCharge), green: cart.shippingCharge === 0 },
-                      ].filter(Boolean).map((row) => {
-                        if (!row) return null;
-                        const r = row as { label: string; value: string; green?: boolean };
-                        return (
-                          <div key={r.label} className="flex justify-between text-sm">
-                            <span className="text-[var(--muted)] font-utility">{r.label}</span>
-                            <span className={cn("font-utility font-medium", r.green ? "text-green-500" : "text-[var(--foreground)]")}>
-                              {r.value}
-                            </span>
-                          </div>
-                        );
-                      })}
+                      <div className="flex justify-between text-sm">
+                        <span className="text-[var(--muted)] font-utility">Subtotal</span>
+                        <span className="font-utility font-medium text-[var(--foreground)]">
+                          {formatCurrency(cart.subtotal)}
+                        </span>
+                      </div>
+                      {(cart.discount ?? 0) > 0 && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-green-500 font-utility">Discount</span>
+                          <span className="text-green-500 font-utility font-medium">
+                            −{formatCurrency(cart.discount)}
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex justify-between text-sm">
+                        <span className="text-[var(--muted)] font-utility">GST (5%)</span>
+                        <span className="font-utility font-medium text-[var(--foreground)]">
+                          {formatCurrency(cart.gst)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-[var(--muted)] font-utility">Shipping</span>
+                        <span
+                          className={cn(
+                            "font-utility font-medium",
+                            (cart.shippingCharge ?? 0) === 0 ? "text-green-500" : "text-[var(--foreground)]"
+                          )}
+                        >
+                          {(cart.shippingCharge ?? 0) === 0 ? "FREE" : formatCurrency(cart.shippingCharge)}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="flex justify-between border-t border-[var(--border)] pt-3 mt-3">
@@ -535,7 +560,7 @@ export default function CheckoutPage() {
                       ) : (
                         <>
                           <CheckCircle size={16} />
-                          Place Order
+                          Place Order (COD)
                         </>
                       )}
                     </button>
