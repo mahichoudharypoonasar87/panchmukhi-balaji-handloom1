@@ -67,81 +67,119 @@ const convertTimestamp = (data: Record<string, unknown>): Record<string, unknown
 export const getProducts = async (
   filters: ProductFilters = {},
   pageSize = 12,
-  lastDoc?: DocumentSnapshot
+  // lastDoc param kept for API compat but JS pagination is used instead
+  _lastDoc?: unknown
 ): Promise<PaginatedResponse<Product>> => {
-  const constraints: QueryConstraint[] = [where("isActive", "==", true)];
-
-  // ── Category filter (slug OR id) ──────────────────────────────────────────
-  if (filters.category) {
-    // First try to find a category whose SLUG matches (used in URLs like ?category=sarees)
-    try {
-      const catBySlug = await getDocs(
-        query(
-          collection(db, "categories"),
-          where("slug", "==", filters.category),
-          limit(1)
-        )
-      );
-      if (!catBySlug.empty) {
-        // Found by slug → use its Firestore document ID
-        constraints.push(where("categoryId", "==", catBySlug.docs[0].id));
-      } else {
-        // Treat the value as a direct Firestore ID
-        constraints.push(where("categoryId", "==", filters.category));
-      }
-    } catch {
-      constraints.push(where("categoryId", "==", filters.category));
-    }
-  }
-
-  // ── Price filters ─────────────────────────────────────────────────────────
-  if (filters.minPrice !== undefined) {
-    constraints.push(where("basePrice", ">=", filters.minPrice));
-  }
-  if (filters.maxPrice !== undefined) {
-    constraints.push(where("basePrice", "<=", filters.maxPrice));
-  }
-  if (filters.inStock) {
-    constraints.push(where("stock", ">", 0));
-  }
-
-  // ── Sorting ───────────────────────────────────────────────────────────────
-  switch (filters.sortBy) {
-    case "price_asc":
-      constraints.push(orderBy("basePrice", "asc"));
-      break;
-    case "price_desc":
-      constraints.push(orderBy("basePrice", "desc"));
-      break;
-    case "popular":
-      constraints.push(orderBy("reviewCount", "desc"));
-      break;
-    case "rating":
-      constraints.push(orderBy("rating", "desc"));
-      break;
-    default:
-      constraints.push(orderBy("createdAt", "desc"));
-  }
-
-  if (lastDoc) constraints.push(startAfter(lastDoc));
-  constraints.push(limit(pageSize + 1));
-
   try {
-    const snapshot = await getDocs(query(collection(db, "products"), ...constraints));
-    const hasMore = snapshot.docs.length > pageSize;
-    const docs = hasMore ? snapshot.docs.slice(0, pageSize) : snapshot.docs;
+    // ── Step 1: Resolve category slug → Firestore doc ID ─────────────────
+    let resolvedCategoryId: string | undefined;
+    if (filters.category) {
+      try {
+        // Check if it looks like a slug (no special chars of a Firestore ID)
+        const slugSnap = await getDocs(
+          query(
+            collection(db, "categories"),
+            where("slug", "==", filters.category),
+            limit(1)
+          )
+        );
+        resolvedCategoryId = slugSnap.empty
+          ? filters.category          // treat as direct Firestore ID
+          : slugSnap.docs[0].id;      // found by slug
+      } catch {
+        resolvedCategoryId = filters.category;
+      }
+    }
 
-    return {
-      data: docs.map((d) => ({
-        id: d.id,
-        ...convertTimestamp(d.data() as Record<string, unknown>),
-      })) as Product[],
-      total: docs.length,
-      page: 1,
-      pageSize,
-      hasMore,
-      lastDoc: docs[docs.length - 1],
-    };
+    // ── Step 2: Build Firestore query with at most ONE where clause ────────
+    // Only ONE equality where at a time = uses auto-created single-field index
+    // = NO composite index required AT ALL.
+    const constraints: QueryConstraint[] = [];
+
+    if (resolvedCategoryId) {
+      // Category selected → filter by categoryId
+      constraints.push(where("categoryId", "==", resolvedCategoryId));
+    }
+    // No other Firestore where clauses — everything else done in JavaScript
+
+    // Fetch enough documents to paginate after JS filtering
+    // 200 is safe for a small handloom store (≈ max products they'll have)
+    constraints.push(limit(200));
+
+    const snapshot = await getDocs(
+      query(collection(db, "products"), ...constraints)
+    );
+
+    // ── Step 3: Map documents ────────────────────────────────────────────
+    let products = snapshot.docs.map((d) => ({
+      id: d.id,
+      ...convertTimestamp(d.data() as Record<string, unknown>),
+    })) as Product[];
+
+    // ── Step 4: JavaScript filtering ────────────────────────────────────
+    // isActive filter
+    products = products.filter((p) => p.isActive !== false);
+
+    // Price range
+    if (filters.minPrice !== undefined) {
+      products = products.filter((p) => (p.basePrice ?? 0) >= filters.minPrice!);
+    }
+    if (filters.maxPrice !== undefined) {
+      products = products.filter((p) => (p.basePrice ?? 0) <= filters.maxPrice!);
+    }
+
+    // In-stock only
+    if (filters.inStock) {
+      products = products.filter((p) => (p.stock ?? 0) > 0);
+    }
+
+    // Minimum rating
+    if (filters.rating !== undefined) {
+      products = products.filter((p) => (p.rating ?? 0) >= filters.rating!);
+    }
+
+    // Full-text search across name, description, category, tags
+    if (filters.search && filters.search.trim()) {
+      const q = filters.search.trim().toLowerCase();
+      products = products.filter(
+        (p) =>
+          p.name?.toLowerCase().includes(q) ||
+          p.description?.toLowerCase().includes(q) ||
+          p.shortDescription?.toLowerCase().includes(q) ||
+          p.categoryName?.toLowerCase().includes(q) ||
+          p.fabricType?.toLowerCase().includes(q) ||
+          p.tags?.some((t) => t.toLowerCase().includes(q))
+      );
+    }
+
+    // ── Step 5: JavaScript sorting ───────────────────────────────────────
+    switch (filters.sortBy) {
+      case "price_asc":
+        products.sort((a, b) => (a.basePrice ?? 0) - (b.basePrice ?? 0));
+        break;
+      case "price_desc":
+        products.sort((a, b) => (b.basePrice ?? 0) - (a.basePrice ?? 0));
+        break;
+      case "popular":
+        products.sort((a, b) => (b.reviewCount ?? 0) - (a.reviewCount ?? 0));
+        break;
+      case "rating":
+        products.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+        break;
+      default: // "newest"
+        products.sort(
+          (a, b) =>
+            new Date(b.createdAt ?? 0).getTime() -
+            new Date(a.createdAt ?? 0).getTime()
+        );
+    }
+
+    // ── Step 6: Paginate ─────────────────────────────────────────────────
+    const total   = products.length;
+    const hasMore = total > pageSize;
+    const data    = products.slice(0, pageSize);
+
+    return { data, total, page: 1, pageSize, hasMore };
   } catch (err) {
     console.error("[getProducts] query failed:", err);
     return { data: [], total: 0, page: 1, pageSize, hasMore: false };
