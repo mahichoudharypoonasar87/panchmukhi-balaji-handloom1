@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const baseUrl =
-    process.env.NEXT_PUBLIC_APP_URL || "https://panchmukhibalajihandloom.com";
+    process.env.NEXT_PUBLIC_APP_URL || "https://panchmukhi-balaji-handloom1.vercel.app/";
 
   // Static routes — always included
   const staticRoutes: MetadataRoute.Sitemap = [
