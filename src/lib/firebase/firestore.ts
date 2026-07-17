@@ -320,14 +320,73 @@ export const createProduct = async (
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+
+  // Increment category product count
+  if (productData.categoryId) {
+    try {
+      await updateDoc(doc(db, "categories", productData.categoryId), {
+        productCount: increment(1),
+        updatedAt: serverTimestamp(),
+      });
+    } catch {
+      /* non-critical */
+    }
+  }
+
   return ref.id;
 };
 
-export const updateProduct = async (id: string, data: Partial<Product>): Promise<void> => {
-  await updateDoc(doc(db, "products", id), { ...data, updatedAt: serverTimestamp() });
+export const updateProduct = async (
+  id: string,
+  data: Partial<Product>
+): Promise<void> => {
+  // If category changed, update both old and new category counts
+  if (data.categoryId) {
+    try {
+      const snap = await getDoc(doc(db, "products", id));
+      if (snap.exists()) {
+        const oldCategoryId = (snap.data() as Product).categoryId;
+        if (oldCategoryId && oldCategoryId !== data.categoryId) {
+          // Decrement old category
+          await updateDoc(doc(db, "categories", oldCategoryId), {
+            productCount: increment(-1),
+            updatedAt: serverTimestamp(),
+          }).catch(() => {});
+          // Increment new category
+          await updateDoc(doc(db, "categories", data.categoryId), {
+            productCount: increment(1),
+            updatedAt: serverTimestamp(),
+          }).catch(() => {});
+        }
+      }
+    } catch {
+      /* non-critical */
+    }
+  }
+
+  await updateDoc(doc(db, "products", id), {
+    ...data,
+    updatedAt: serverTimestamp(),
+  });
 };
 
 export const deleteProduct = async (id: string): Promise<void> => {
+  // Decrement category count before deleting
+  try {
+    const snap = await getDoc(doc(db, "products", id));
+    if (snap.exists()) {
+      const categoryId = (snap.data() as Product).categoryId;
+      if (categoryId) {
+        await updateDoc(doc(db, "categories", categoryId), {
+          productCount: increment(-1),
+          updatedAt: serverTimestamp(),
+        }).catch(() => {});
+      }
+    }
+  } catch {
+    /* non-critical */
+  }
+
   await deleteDoc(doc(db, "products", id));
 };
 
