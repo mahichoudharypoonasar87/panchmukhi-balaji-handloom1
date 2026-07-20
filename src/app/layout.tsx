@@ -4,6 +4,8 @@ import { Toaster } from "react-hot-toast";
 import { AuthProvider } from "@/context/AuthContext";
 import { CartProvider } from "@/context/CartContext";
 import { WishlistProvider } from "@/context/WishlistContext";
+import { SiteSettingsProvider } from "@/context/SiteSettingsContext";
+import MaintenanceGate from "@/components/layout/MaintenanceGate";
 import "@/styles/globals.css";
 
 export const metadata: Metadata = {
@@ -100,37 +102,33 @@ export default function RootLayout({
           disableTransitionOnChange={false}
         >
           <AuthProvider>
-            <CartProvider>
-              <WishlistProvider>
-                {children}
-                <Toaster
-                  position="top-right"
-                  toastOptions={{
-                    duration: 3000,
-                    style: {
-                      background: "#1A0A00",
-                      color: "#FFF8EE",
-                      border: "1px solid rgba(212, 175, 55, 0.3)",
-                      borderRadius: "12px",
-                      fontFamily: "Outfit, system-ui, sans-serif",
-                      fontSize: "14px",
-                    },
-                    success: {
-                      iconTheme: {
-                        primary: "#D4AF37",
-                        secondary: "#1A0A00",
+            <SiteSettingsProvider>
+              <CartProvider>
+                <WishlistProvider>
+                  <MaintenanceGate>{children}</MaintenanceGate>
+                  <Toaster
+                    position="top-right"
+                    toastOptions={{
+                      duration: 3000,
+                      style: {
+                        background: "#1A0A00",
+                        color: "#FFF8EE",
+                        border: "1px solid rgba(212, 175, 55, 0.3)",
+                        borderRadius: "12px",
+                        fontFamily: "Outfit, system-ui, sans-serif",
+                        fontSize: "14px",
                       },
-                    },
-                    error: {
-                      iconTheme: {
-                        primary: "#8B1A1A",
-                        secondary: "#FFF8EE",
+                      success: {
+                        iconTheme: { primary: "#D4AF37", secondary: "#1A0A00" },
                       },
-                    },
-                  }}
-                />
-              </WishlistProvider>
-            </CartProvider>
+                      error: {
+                        iconTheme: { primary: "#8B1A1A", secondary: "#FFF8EE" },
+                      },
+                    }}
+                  />
+                </WishlistProvider>
+              </CartProvider>
+            </SiteSettingsProvider>
           </AuthProvider>
         </ThemeProvider>
       </body>
