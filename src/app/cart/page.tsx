@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
@@ -18,15 +18,31 @@ import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
+import { useSiteSettings } from "@/context/SiteSettingsContext";
+import { getActiveCoupons } from "@/lib/firebase/firestore";
+import { Coupon } from "@/types";
 import { formatCurrency, cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 
 export default function CartPage() {
   const router = useRouter();
   const { user } = useAuth();
+  const { settings } = useSiteSettings();
   const { cart, cartCount, updateQuantity, removeFromCart, applyCoupon, loading } = useCart();
   const [couponInput, setCouponInput] = useState("");
   const [applyingCoupon, setApplyingCoupon] = useState(false);
+  const [availableCoupons, setAvailableCoupons] = useState<Coupon[]>([]);
+  const [loadingCoupons, setLoadingCoupons] = useState(true);
+
+  const freeShippingAbove = settings?.freeShippingAbove ?? 999;
+  const gstRate = settings?.gstRate ?? 5;
+
+  useEffect(() => {
+    if (!user) return;
+    getActiveCoupons()
+      .then(setAvailableCoupons)
+      .finally(() => setLoadingCoupons(false));
+  }, [user]);
 
   if (!user) {
     return (
@@ -80,6 +96,12 @@ export default function CartPage() {
     await applyCoupon(couponInput.trim().toUpperCase());
     setApplyingCoupon(false);
     setCouponInput("");
+  };
+
+  const handleApplyCouponCode = async (code: string) => {
+    setApplyingCoupon(true);
+    await applyCoupon(code);
+    setApplyingCoupon(false);
   };
 
   return (
@@ -265,6 +287,42 @@ export default function CartPage() {
                     </button>
                   </div>
 
+                  {/* Available Coupons — one-tap apply for any live coupon */}
+                  {!cart.couponCode && !loadingCoupons && availableCoupons.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-[var(--muted)] text-[10px] font-utility font-semibold uppercase tracking-wide">
+                        Available Offers
+                      </p>
+                      {availableCoupons.map((coupon) => (
+                        <div
+                          key={coupon.id}
+                          className="flex items-center justify-between gap-2 p-2.5 rounded-xl border border-dashed border-gold-500/30 bg-gold-500/5"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-gold-500 text-xs font-utility font-bold">
+                              {coupon.code}
+                            </p>
+                            <p className="text-[var(--muted)] text-[10px] font-utility truncate">
+                              {coupon.discountType === "percentage"
+                                ? `${coupon.discountValue}% off`
+                                : `${formatCurrency(coupon.discountValue)} off`}
+                              {coupon.minOrderValue > 0
+                                ? ` · Min ${formatCurrency(coupon.minOrderValue)}`
+                                : ""}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => handleApplyCouponCode(coupon.code)}
+                            disabled={applyingCoupon}
+                            className="flex-shrink-0 text-gold-500 hover:text-gold-400 text-xs font-utility font-bold px-3 py-1.5 rounded-lg border border-gold-500/40 hover:bg-gold-500/10 transition-all disabled:opacity-50"
+                          >
+                            Apply
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {cart.couponCode && (
                     <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-green-500/10 border border-green-500/30">
                       <span className="text-green-500 text-xs font-utility font-semibold">
@@ -299,7 +357,7 @@ export default function CartPage() {
 
                     <div className="flex justify-between text-sm">
                       <span className="text-[var(--muted)] font-utility">
-                        GST (5%)
+                        GST ({gstRate}%)
                       </span>
                       <span className="font-utility font-medium text-[var(--foreground)]">
                         {formatCurrency(cart.gst)}
@@ -328,7 +386,7 @@ export default function CartPage() {
                       <p className="text-[var(--muted)] text-[10px] font-utility">
                         Add{" "}
                         {formatCurrency(
-                          999 - (cart.subtotal - cart.discount)
+                          Math.max(0, freeShippingAbove - (cart.subtotal - cart.discount))
                         )}{" "}
                         more for free shipping
                       </p>
