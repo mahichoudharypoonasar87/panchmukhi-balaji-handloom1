@@ -5,20 +5,23 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
   Package, MapPin, CreditCard, ArrowLeft, CheckCircle,
-  Truck, Clock, XCircle, MessageCircle, Star
+  Truck, MessageCircle, Ban, Loader2
 } from "lucide-react";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
-import { getOrderById } from "@/lib/firebase/firestore";
+import { getOrderById, cancelOrderByCustomer } from "@/lib/firebase/firestore";
 import { Order } from "@/types";
 import { formatCurrency, formatDateTime, getOrderStatusColor, getOrderStatusLabel, cn } from "@/lib/utils";
-import { Loader2 } from "lucide-react";
+import toast from "react-hot-toast";
 
 function OrderDetailContent() {
   const params = useParams();
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showCancelForm, setShowCancelForm] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelling, setCancelling] = useState(false);
   const whatsappNumber = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || "91XXXXXXXXXX";
 
   useEffect(() => {
@@ -57,6 +60,26 @@ function OrderDetailContent() {
     window.open(`https://wa.me/${whatsappNumber}?text=${encodeURIComponent(msg)}`, "_blank");
   };
 
+  const handleCancelOrder = async () => {
+    setCancelling(true);
+    try {
+      await cancelOrderByCustomer(order.id, cancelReason.trim());
+      setOrder((prev) =>
+        prev
+          ? { ...prev, status: "cancelled", cancelReason: cancelReason.trim() || "Cancelled by customer" }
+          : prev
+      );
+      toast.success("Order cancelled");
+      setShowCancelForm(false);
+      setCancelReason("");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to cancel order. Please try again or contact support.");
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   return (
     <>
       <Navbar />
@@ -83,6 +106,65 @@ function OrderDetailContent() {
               {getOrderStatusLabel(order.status)}
             </span>
           </div>
+
+          {/* Cancel Order — only while pending, matching what Firestore
+              rules allow a customer to change themselves. */}
+          {order.status === "pending" && (
+            <div className="mb-6 p-5 rounded-3xl bg-[var(--card-bg)] border border-crimson-900/30">
+              {!showCancelForm ? (
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <div>
+                    <p className="text-[var(--foreground)] font-body font-semibold text-sm">
+                      Need to cancel this order?
+                    </p>
+                    <p className="text-[var(--muted)] text-xs font-utility mt-0.5">
+                      You can cancel free of charge while it&apos;s still pending confirmation.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowCancelForm(true)}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-crimson-900/40 text-crimson-400 hover:bg-crimson-900/10 text-xs font-utility font-semibold transition-all flex-shrink-0"
+                  >
+                    <Ban size={14} />
+                    Cancel Order
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-[var(--foreground)] font-body font-semibold text-sm mb-1">
+                    Cancel Order #{order.orderNumber}?
+                  </p>
+                  <p className="text-[var(--muted)] text-xs font-utility mb-3">
+                    This can&apos;t be undone. Let us know why (optional) — it helps us improve.
+                  </p>
+                  <textarea
+                    value={cancelReason}
+                    onChange={(e) => setCancelReason(e.target.value)}
+                    placeholder="Reason for cancelling (optional)"
+                    rows={2}
+                    className="input-luxury resize-none text-sm mb-3"
+                  />
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleCancelOrder}
+                      disabled={cancelling}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-crimson-900 hover:bg-crimson-800 text-ivory-100 text-xs font-utility font-semibold transition-all"
+                    >
+                      {cancelling ? <Loader2 size={14} className="animate-spin" /> : <Ban size={14} />}
+                      Confirm Cancellation
+                    </button>
+                    <button
+                      onClick={() => { setShowCancelForm(false); setCancelReason(""); }}
+                      disabled={cancelling}
+                      className="px-4 py-2.5 rounded-xl border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] text-xs font-utility font-semibold transition-all"
+                    >
+                      Never Mind
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="grid lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
