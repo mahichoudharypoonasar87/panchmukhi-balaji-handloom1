@@ -180,7 +180,6 @@ export const contactSchema = z.object({
     .refine((val) => !val || /^[6-9]\d{9}$/.test(val), {
       message: "Enter a valid 10-digit mobile number",
     }),
-  export type ContactFormData = z.infer<typeof contactSchema>;
   subject: z.string().min(3, "Please add a short subject"),
   message: z.string().min(10, "Message must be at least 10 characters").max(1000, "Message is too long"),
 });
