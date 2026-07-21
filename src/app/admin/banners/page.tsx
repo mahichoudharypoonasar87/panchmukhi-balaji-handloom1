@@ -5,9 +5,9 @@ import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Plus, Edit2, Trash2, X, Loader2, ImagePlus, Image as ImageIcon } from "lucide-react";
+import { Plus, Edit2, Trash2, X, Loader2, ImagePlus, Image as ImageIcon, Eye, EyeOff } from "lucide-react";
 import AdminLayout from "@/components/admin/AdminLayout";
-import { getBanners, createBanner, updateBanner, deleteBanner } from "@/lib/firebase/firestore";
+import { getAllBannersAdmin, createBanner, updateBanner, deleteBanner } from "@/lib/firebase/firestore";
 import { uploadBannerImage, validateImageFile } from "@/lib/firebase/storage";
 import { bannerSchema, BannerFormData } from "@/lib/validations";
 import { Banner } from "@/types";
@@ -21,6 +21,7 @@ export default function AdminBannersPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [imageUrl, setImageUrl] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const {
     register,
@@ -36,7 +37,9 @@ export default function AdminBannersPage() {
   const fetchBanners = async () => {
     setLoading(true);
     try {
-      const data = await getBanners();
+      // Admin sees ALL banners (active + inactive) so they can be managed —
+      // the public getBanners() only returns active ones for the storefront.
+      const data = await getAllBannersAdmin();
       setBanners(data);
     } finally {
       setLoading(false);
@@ -88,6 +91,21 @@ export default function AdminBannersPage() {
       toast.success("Banner deleted");
     } catch {
       toast.error("Failed to delete banner");
+    }
+  };
+
+  const handleToggleActive = async (banner: Banner) => {
+    setTogglingId(banner.id);
+    try {
+      await updateBanner(banner.id, { isActive: !banner.isActive });
+      setBanners((prev) =>
+        prev.map((b) => (b.id === banner.id ? { ...b, isActive: !b.isActive } : b))
+      );
+      toast.success(banner.isActive ? "Banner hidden" : "Banner activated");
+    } catch {
+      toast.error("Failed to update banner");
+    } finally {
+      setTogglingId(null);
     }
   };
 
@@ -259,8 +277,19 @@ export default function AdminBannersPage() {
               </div>
               <div className="p-4">
                 <p className="font-body font-semibold text-[var(--foreground)] text-sm truncate">{banner.title}</p>
-                <p className="text-[var(--muted)] text-xs font-utility capitalize mb-3">{banner.type} banner</p>
+                <p className="text-[var(--muted)] text-xs font-utility capitalize mb-3">{banner.type} banner · order {banner.order}</p>
                 <div className="flex gap-2">
+                  <button
+                    onClick={() => handleToggleActive(banner)}
+                    disabled={togglingId === banner.id}
+                    className={cn(
+                      "flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-utility transition-all",
+                      banner.isActive ? "text-orange-400 hover:bg-orange-400/10" : "text-green-500 hover:bg-green-500/10"
+                    )}
+                  >
+                    {togglingId === banner.id ? <Loader2 size={12} className="animate-spin" /> : banner.isActive ? <EyeOff size={12} /> : <Eye size={12} />}
+                    {banner.isActive ? "Hide" : "Show"}
+                  </button>
                   <button onClick={() => handleEdit(banner)} className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-blue-400 hover:bg-blue-400/10 text-xs font-utility transition-all">
                     <Edit2 size={12} /> Edit
                   </button>
