@@ -54,6 +54,24 @@ const convertTimestamp = (data: Record<string, unknown>): Record<string, unknown
   return result;
 };
 
+/**
+ * Removes undefined values from an object recursively.
+ * Firestore throws: "Unsupported field value: undefined"
+ * This sanitizer replaces undefined with null and removes undefined keys.
+ */
+function sanitize(obj: unknown): unknown {
+  if (obj === undefined) return null;
+  if (obj === null || typeof obj !== "object") return obj;
+  if (Array.isArray(obj)) return obj.map(sanitize);
+  const result: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+    if (v !== undefined) {
+      result[k] = sanitize(v);
+    }
+  }
+  return result;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // PRODUCTS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -75,7 +93,6 @@ export const getProducts = async (
     let resolvedCategoryId: string | undefined;
     if (filters.category) {
       try {
-        // Check if it looks like a slug (no special chars of a Firestore ID)
         const slugSnap = await getDocs(
           query(
             collection(db, "categories"),
@@ -84,26 +101,20 @@ export const getProducts = async (
           )
         );
         resolvedCategoryId = slugSnap.empty
-          ? filters.category          // treat as direct Firestore ID
-          : slugSnap.docs[0].id;      // found by slug
+          ? filters.category
+          : slugSnap.docs[0].id;
       } catch {
         resolvedCategoryId = filters.category;
       }
     }
 
     // ── Step 2: Build Firestore query with at most ONE where clause ────────
-    // Only ONE equality where at a time = uses auto-created single-field index
-    // = NO composite index required AT ALL.
     const constraints: QueryConstraint[] = [];
 
     if (resolvedCategoryId) {
-      // Category selected → filter by categoryId
       constraints.push(where("categoryId", "==", resolvedCategoryId));
     }
-    // No other Firestore where clauses — everything else done in JavaScript
 
-    // Fetch enough documents to paginate after JS filtering
-    // 200 is safe for a small handloom store (≈ max products they'll have)
     constraints.push(limit(200));
 
     const snapshot = await getDocs(
@@ -117,10 +128,8 @@ export const getProducts = async (
     })) as Product[];
 
     // ── Step 4: JavaScript filtering ────────────────────────────────────
-    // isActive filter
     products = products.filter((p) => p.isActive !== false);
 
-    // Price range
     if (filters.minPrice !== undefined) {
       products = products.filter((p) => (p.basePrice ?? 0) >= filters.minPrice!);
     }
@@ -128,17 +137,14 @@ export const getProducts = async (
       products = products.filter((p) => (p.basePrice ?? 0) <= filters.maxPrice!);
     }
 
-    // In-stock only
     if (filters.inStock) {
       products = products.filter((p) => (p.stock ?? 0) > 0);
     }
 
-    // Minimum rating
     if (filters.rating !== undefined) {
       products = products.filter((p) => (p.rating ?? 0) >= filters.rating!);
     }
 
-    // Full-text search across name, description, category, tags
     if (filters.search && filters.search.trim()) {
       const q = filters.search.trim().toLowerCase();
       products = products.filter(
@@ -166,7 +172,7 @@ export const getProducts = async (
       case "rating":
         products.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
         break;
-      default: // "newest"
+      default:
         products.sort(
           (a, b) =>
             new Date(b.createdAt ?? 0).getTime() -
@@ -321,7 +327,6 @@ export const createProduct = async (
     updatedAt: serverTimestamp(),
   });
 
-  // Increment category product count
   if (productData.categoryId) {
     try {
       await updateDoc(doc(db, "categories", productData.categoryId), {
@@ -340,19 +345,16 @@ export const updateProduct = async (
   id: string,
   data: Partial<Product>
 ): Promise<void> => {
-  // If category changed, update both old and new category counts
   if (data.categoryId) {
     try {
       const snap = await getDoc(doc(db, "products", id));
       if (snap.exists()) {
         const oldCategoryId = (snap.data() as Product).categoryId;
         if (oldCategoryId && oldCategoryId !== data.categoryId) {
-          // Decrement old category
           await updateDoc(doc(db, "categories", oldCategoryId), {
             productCount: increment(-1),
             updatedAt: serverTimestamp(),
           }).catch(() => {});
-          // Increment new category
           await updateDoc(doc(db, "categories", data.categoryId), {
             productCount: increment(1),
             updatedAt: serverTimestamp(),
@@ -371,7 +373,6 @@ export const updateProduct = async (
 };
 
 export const deleteProduct = async (id: string): Promise<void> => {
-  // Decrement category count before deleting
   try {
     const snap = await getDoc(doc(db, "products", id));
     if (snap.exists()) {
@@ -427,7 +428,7 @@ export const deleteCategory = async (id: string): Promise<void> => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CART
+// CART & COUPONS
 // ─────────────────────────────────────────────────────────────────────────────
 export const subscribeToCart = (userId: string, callback: (cart: Cart | null) => void) => {
   return onSnapshot(doc(db, "carts", userId), (snap) => {
@@ -439,21 +440,33 @@ export const subscribeToCart = (userId: string, callback: (cart: Cart | null) =>
   });
 };
 
+export interface CartRates {
+  gstRate?: number;
+  shippingCharge?: number;
+  freeShippingAbove?: number;
+}
+
 const calcTotals = (
   items: CartItem[],
-  couponDiscount = 0
+  couponDiscount = 0,
+  rates: CartRates = {}
 ): Pick<Cart, "subtotal" | "discount" | "shippingCharge" | "gst" | "total"> => {
+  const { gstRate = 5, shippingCharge: flatShipping = 80, freeShippingAbove = 999 } = rates;
   const subtotal = items.reduce((s, i) => s + i.mrp * i.quantity, 0);
   const itemDiscount = items.reduce((s, i) => s + (i.mrp - i.price) * i.quantity, 0);
   const discount = itemDiscount + couponDiscount;
   const afterDiscount = Math.max(0, subtotal - discount);
-  const shippingCharge = afterDiscount >= 999 ? 0 : 80;
-  const gst = Math.round(afterDiscount * 0.05);
+  const shippingCharge = afterDiscount >= freeShippingAbove ? 0 : flatShipping;
+  const gst = Math.round(afterDiscount * (gstRate / 100));
   const total = afterDiscount + shippingCharge + gst;
   return { subtotal, discount, shippingCharge, gst, total };
 };
 
-export const addToCart = async (userId: string, item: Omit<CartItem, "id">): Promise<void> => {
+export const addToCart = async (
+  userId: string,
+  item: Omit<CartItem, "id">,
+  rates?: CartRates
+): Promise<void> => {
   const cartRef = doc(db, "carts", userId);
   const cartSnap = await getDoc(cartRef);
   const newItem: CartItem = {
@@ -466,7 +479,7 @@ export const addToCart = async (userId: string, item: Omit<CartItem, "id">): Pro
       userId,
       items: [newItem],
       couponDiscount: 0,
-      ...calcTotals([newItem]),
+      ...calcTotals([newItem], 0, rates),
       updatedAt: serverTimestamp(),
     });
   } else {
@@ -483,7 +496,7 @@ export const addToCart = async (userId: string, item: Omit<CartItem, "id">): Pro
 
     await updateDoc(cartRef, {
       items: updatedItems,
-      ...calcTotals(updatedItems, cartData.couponDiscount || 0),
+      ...calcTotals(updatedItems, cartData.couponDiscount || 0, rates),
       updatedAt: serverTimestamp(),
     });
   }
@@ -492,7 +505,8 @@ export const addToCart = async (userId: string, item: Omit<CartItem, "id">): Pro
 export const updateCartItem = async (
   userId: string,
   itemId: string,
-  quantity: number
+  quantity: number,
+  rates?: CartRates
 ): Promise<void> => {
   const cartRef = doc(db, "carts", userId);
   const snap = await getDoc(cartRef);
@@ -506,13 +520,13 @@ export const updateCartItem = async (
         );
   await updateDoc(cartRef, {
     items: updatedItems,
-    ...calcTotals(updatedItems, cartData.couponDiscount || 0),
+    ...calcTotals(updatedItems, cartData.couponDiscount || 0, rates),
     updatedAt: serverTimestamp(),
   });
 };
 
-export const removeFromCart = async (userId: string, itemId: string): Promise<void> => {
-  await updateCartItem(userId, itemId, 0);
+export const removeFromCart = async (userId: string, itemId: string, rates?: CartRates): Promise<void> => {
+  await updateCartItem(userId, itemId, 0, rates);
 };
 
 export const clearCart = async (userId: string): Promise<void> => {
@@ -532,7 +546,8 @@ export const clearCart = async (userId: string): Promise<void> => {
 
 export const applyCoupon = async (
   userId: string,
-  couponCode: string
+  couponCode: string,
+  rates?: CartRates
 ): Promise<{ success: boolean; discount: number; message: string }> => {
   try {
     const snap = await getDocs(
@@ -545,8 +560,14 @@ export const applyCoupon = async (
     );
     if (snap.empty) return { success: false, discount: 0, message: "Invalid coupon code" };
 
-    const coupon = { id: snap.docs[0].id, ...snap.docs[0].data() } as Coupon;
+    const coupon = {
+      id: snap.docs[0].id,
+      ...convertTimestamp(snap.docs[0].data() as Record<string, unknown>),
+    } as Coupon;
     const now = new Date();
+
+    if (coupon.validFrom && new Date(coupon.validFrom) > now)
+      return { success: false, discount: 0, message: "This coupon is not active yet" };
     if (coupon.validUntil && new Date(coupon.validUntil) < now)
       return { success: false, discount: 0, message: "Coupon has expired" };
     if (coupon.usageLimit && coupon.usageCount >= coupon.usageLimit)
@@ -572,7 +593,7 @@ export const applyCoupon = async (
     await updateDoc(doc(db, "carts", userId), {
       couponCode: coupon.code,
       couponDiscount: discount,
-      ...calcTotals(cartData.items, discount),
+      ...calcTotals(cartData.items, discount, rates),
       updatedAt: serverTimestamp(),
     });
     return { success: true, discount, message: `Coupon applied! You saved ₹${discount}` };
@@ -581,44 +602,63 @@ export const applyCoupon = async (
   }
 };
 
+/**
+ * Coupons currently valid for a customer to use — active, within date
+ * range, and under their usage limit. Used to show "Available Offers"
+ * on the cart page and to power the homepage offer banner.
+ */
+export const getActiveCoupons = async (): Promise<Coupon[]> => {
+  try {
+    const snap = await getDocs(
+      query(collection(db, "coupons"), where("isActive", "==", true))
+    );
+    const now = new Date();
+    return snap.docs
+      .map((d) => ({ id: d.id, ...convertTimestamp(d.data() as Record<string, unknown>) } as Coupon))
+      .filter((c) => {
+        const validFrom = c.validFrom ? new Date(c.validFrom) : null;
+        const validUntil = c.validUntil ? new Date(c.validUntil) : null;
+        if (validFrom && validFrom > now) return false;
+        if (validUntil && validUntil < now) return false;
+        if (c.usageLimit && c.usageCount >= c.usageLimit) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        if (!a.validUntil) return 1;
+        if (!b.validUntil) return -1;
+        return new Date(a.validUntil).getTime() - new Date(b.validUntil).getTime();
+      });
+  } catch (err) {
+    console.error("[getActiveCoupons] error:", err);
+    return [];
+  }
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ORDERS
 // ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * createOrder — simple setDoc (no batch).
- *
- * The original implementation used writeBatch to also decrement product stock
- * and update user stats. This FAILS for non-admin users because Firestore
- * security rules only allow admins to write product documents.
- *
- * Fix: just create the order document (user has permission for that) and
- * optionally update user stats in a separate try/catch so it never blocks
- * the order from being saved.
- */
 export const createOrder = async (
   orderData: Omit<Order, "id" | "createdAt" | "updatedAt">
 ): Promise<string> => {
-  // 1. Create the order document
+  const clean = sanitize(orderData) as typeof orderData;
+
   const orderRef = doc(collection(db, "orders"));
   await setDoc(orderRef, {
-    ...orderData,
+    ...clean,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
 
-  // 2. Update user stats — best effort (non-blocking)
   try {
     await updateDoc(doc(db, "users", orderData.userId), {
       orderCount: increment(1),
-      totalSpent: increment(orderData.total),
+      totalSpent: increment(orderData.total ?? 0),
       updatedAt: serverTimestamp(),
     });
   } catch {
     // Non-critical — user stats may lag slightly
   }
 
-  // 3. Update coupon usage — best effort (non-blocking)
   if (orderData.couponCode) {
     try {
       const couponSnap = await getDocs(
@@ -689,19 +729,18 @@ export const updateOrderStatus = async (
       console.warn("[updateOrderStatus] order not found:", orderId);
       return;
     }
- 
+
     const existing = snap.data() as Order;
- 
-    // Build timeline entry — omit undefined fields Firestore would reject
+
     const timelineEntry: Record<string, unknown> = {
       status,
       timestamp: new Date().toISOString(),
     };
     if (note)      timelineEntry.note      = note;
     if (updatedBy) timelineEntry.updatedBy = updatedBy;
- 
+
     const timeline = [...(existing.timeline || []), timelineEntry];
- 
+
     await updateDoc(doc(db, "orders", orderId), {
       status,
       timeline,
@@ -709,8 +748,42 @@ export const updateOrderStatus = async (
     });
   } catch (err) {
     console.error("[updateOrderStatus] error:", err);
-    throw err; // re-throw so the UI can show an error
+    throw err;
   }
+};
+
+/**
+ * Customer self-service cancellation. Deliberately narrower than
+ * updateOrderStatus: only works while the order is still "pending",
+ * matching what firestore.rules allows a non-admin owner to do, and it
+ * writes cancelReason so Track Order can display it.
+ */
+export const cancelOrderByCustomer = async (
+  orderId: string,
+  reason?: string
+): Promise<void> => {
+  const snap = await getDoc(doc(db, "orders", orderId));
+  if (!snap.exists()) throw new Error("Order not found");
+
+  const existing = snap.data() as Order;
+  if (existing.status !== "pending") {
+    throw new Error("Only pending orders can be cancelled");
+  }
+
+  const finalReason = reason?.trim() || "Cancelled by customer";
+  const timelineEntry: Record<string, unknown> = {
+    status: "cancelled",
+    timestamp: new Date().toISOString(),
+    note: finalReason,
+    updatedBy: "customer",
+  };
+
+  await updateDoc(doc(db, "orders", orderId), {
+    status: "cancelled",
+    cancelReason: finalReason,
+    timeline: [...(existing.timeline || []), timelineEntry],
+    updatedAt: serverTimestamp(),
+  });
 };
 
 export const trackOrder = async (
@@ -718,7 +791,6 @@ export const trackOrder = async (
   phone: string
 ): Promise<Order | null> => {
   try {
-    // Query only by orderNumber — no composite index needed
     const snap = await getDocs(
       query(
         collection(db, "orders"),
@@ -726,20 +798,19 @@ export const trackOrder = async (
         limit(1)
       )
     );
- 
+
     if (snap.empty) return null;
- 
+
     const order = {
       id: snap.docs[0].id,
       ...convertTimestamp(snap.docs[0].data() as Record<string, unknown>),
     } as Order;
- 
-    // Verify phone in JavaScript (avoids need for composite index)
+
     const savedPhone = (order.customerPhone || "").replace(/\s/g, "");
     const inputPhone  = phone.trim().replace(/\s/g, "");
- 
+
     if (savedPhone !== inputPhone) return null;
- 
+
     return order;
   } catch (err) {
     console.error("[trackOrder] error:", err);
@@ -780,6 +851,25 @@ export const getBanners = async (type?: string): Promise<Banner[]> => {
       ...convertTimestamp(d.data() as Record<string, unknown>),
     })) as Banner[];
   } catch {
+    return [];
+  }
+};
+
+/**
+ * Get ALL banners for the admin panel — no isActive filter, so newly
+ * created or currently-inactive banners are still visible to manage.
+ */
+export const getAllBannersAdmin = async (): Promise<Banner[]> => {
+  try {
+    const snap = await getDocs(
+      query(collection(db, "banners"), orderBy("order", "asc"))
+    );
+    return snap.docs.map((d) => ({
+      id: d.id,
+      ...convertTimestamp(d.data() as Record<string, unknown>),
+    })) as Banner[];
+  } catch (err) {
+    console.error("[getAllBannersAdmin] failed:", err);
     return [];
   }
 };
@@ -833,25 +923,33 @@ export const createReview = async (
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-
-  // Update product rating (best effort)
-  try {
-    const productSnap = await getDoc(doc(db, "products", data.productId));
-    if (productSnap.exists()) {
-      const p = productSnap.data() as Product;
-      const newCount = (p.reviewCount || 0) + 1;
-      const newRating = ((p.rating || 0) * (p.reviewCount || 0) + data.rating) / newCount;
-      await updateDoc(doc(db, "products", data.productId), {
-        rating: Math.round(newRating * 10) / 10,
-        reviewCount: newCount,
-        updatedAt: serverTimestamp(),
-      });
-    }
-  } catch {
-    // Non-critical
-  }
-
+  // Rating aggregate is recalculated once the review is approved —
+  // see updateReviewApproval / recalculateProductRating.
   return ref.id;
+};
+
+export const recalculateProductRating = async (productId: string): Promise<void> => {
+  try {
+    const snap = await getDocs(
+      query(collection(db, "reviews"), where("productId", "==", productId), where("isApproved", "==", true))
+    );
+    const approved = snap.docs.map((d) => d.data() as Review);
+    const reviewCount = approved.length;
+    const rating =
+      reviewCount > 0 ? Math.round((approved.reduce((s, r) => s + r.rating, 0) / reviewCount) * 10) / 10 : 0;
+    await updateDoc(doc(db, "products", productId), { rating, reviewCount, updatedAt: serverTimestamp() });
+  } catch (err) {
+    console.error("[recalculateProductRating] error:", err);
+  }
+};
+
+export const updateReviewApproval = async (
+  reviewId: string,
+  productId: string,
+  isApproved: boolean
+): Promise<void> => {
+  await updateDoc(doc(db, "reviews", reviewId), { isApproved, updatedAt: serverTimestamp() });
+  await recalculateProductRating(productId);
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -906,20 +1004,20 @@ export const getDashboardStats = async () => {
       getDocs(collection(db, "orders")),
       getDocs(collection(db, "users")),
     ]);
- 
+
     const orders = ordersSnap.docs.map((d) => {
       const data = d.data();
       return {
-        id: d.id,                                          // ← THIS WAS MISSING
+        id: d.id,
         ...data,
         createdAt: data.createdAt?.toDate?.() || new Date(),
         updatedAt: data.updatedAt?.toDate?.() || new Date(),
       } as Order;
     });
- 
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
- 
+
     return {
       totalUsers: usersSnap.size,
       totalOrders: orders.length,
@@ -951,4 +1049,3 @@ export const getDashboardStats = async () => {
     };
   }
 };
- 
