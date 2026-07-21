@@ -169,6 +169,22 @@ export const trackOrderSchema = z.object({
 });
 
 // =============================================
+// CONTACT SCHEMA
+// =============================================
+export const contactSchema = z.object({
+  name: z.string().min(2, "Name must be at least 2 characters"),
+  email: z.string().min(1, "Email is required").email("Invalid email address"),
+  phone: z
+    .string()
+    .optional()
+    .refine((val) => !val || /^[6-9]\d{9}$/.test(val), {
+      message: "Enter a valid 10-digit mobile number",
+    }),
+  subject: z.string().min(3, "Please add a short subject"),
+  message: z.string().min(10, "Message must be at least 10 characters").max(1000, "Message is too long"),
+});
+
+// =============================================
 // TYPES FROM SCHEMAS
 // =============================================
 export type LoginFormData = z.infer<typeof loginSchema>;
