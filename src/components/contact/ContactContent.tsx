@@ -90,9 +90,7 @@ ${data.message}`;
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10">
           <div className="grid sm:grid-cols-3 gap-4 mb-10">
             {CONTACT_CARDS.map(({ icon: Icon, label, value, href, color, bg }) => (
-              
-                key={label}
-                href={href}
+              <a key={label} href={href}
                 target={href.startsWith("http") ? "_blank" : undefined}
                 rel={href.startsWith("http") ? "noopener noreferrer" : undefined}
                 className="p-5 rounded-3xl bg-[var(--card-bg)] border border-[var(--border)] hover:border-gold-500/30 transition-all text-center"
@@ -207,8 +205,7 @@ ${data.message}`;
                 </p>
               </div>
 
-              
-                href={`https://wa.me/${whatsappNumber}?text=Hello! I have a query about your handloom products.`}
+              <a href={`https://wa.me/${whatsappNumber}?text=Hello! I have a query about your handloom products.`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-3 p-5 rounded-3xl bg-green-600/10 border border-green-600/30 hover:bg-green-600/20 transition-colors"
