@@ -198,3 +198,4 @@ export type CouponFormData = z.infer<typeof couponSchema>;
 export type CategoryFormData = z.infer<typeof categorySchema>;
 export type BannerFormData = z.infer<typeof bannerSchema>;
 export type TrackOrderFormData = z.infer<typeof trackOrderSchema>;
+export type ContactFormData = z.infer<typeof contactSchema>;
