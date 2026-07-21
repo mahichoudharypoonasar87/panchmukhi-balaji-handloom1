@@ -3,20 +3,22 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Package, ChevronRight, ShoppingBag } from "lucide-react";
+import { Package, ChevronRight, ShoppingBag, Loader2 } from "lucide-react";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import ProfileSidebar from "@/components/profile/ProfileSidebar";
 import { useAuth } from "@/context/AuthContext";
-import { getUserOrders } from "@/lib/firebase/firestore";
+import { getUserOrders, cancelOrderByCustomer } from "@/lib/firebase/firestore";
 import { Order } from "@/types";
 import { formatCurrency, formatDate, getOrderStatusColor, getOrderStatusLabel } from "@/lib/utils";
+import toast from "react-hot-toast";
 
 function OrdersContent() {
   const { user } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -24,6 +26,20 @@ function OrdersContent() {
       .then(setOrders)
       .finally(() => setLoading(false));
   }, [user]);
+
+  const handleQuickCancel = async (orderId: string, orderNumber: string) => {
+    if (!confirm(`Cancel order #${orderNumber}? This cannot be undone.`)) return;
+    setCancellingId(orderId);
+    try {
+      await cancelOrderByCustomer(orderId);
+      setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status: "cancelled" } : o)));
+      toast.success("Order cancelled");
+    } catch {
+      toast.error("Failed to cancel order");
+    } finally {
+      setCancellingId(null);
+    }
+  };
 
   return (
     <>
@@ -124,13 +140,24 @@ function OrdersContent() {
                             {formatCurrency(order.total)}
                           </p>
                         </div>
-                        <Link
-                          href={`/profile/orders/${order.id}`}
-                          className="flex items-center gap-1 text-gold-500 hover:text-gold-400 text-xs font-utility font-semibold transition-colors"
-                        >
-                          View Details
-                          <ChevronRight size={14} />
-                        </Link>
+                        <div className="flex items-center gap-4">
+                          {order.status === "pending" && (
+                            <button
+                              onClick={() => handleQuickCancel(order.id, order.orderNumber)}
+                              disabled={cancellingId === order.id}
+                              className="flex items-center gap-1 text-crimson-400 hover:text-crimson-300 text-xs font-utility font-semibold transition-colors"
+                            >
+                              {cancellingId === order.id ? <Loader2 size={12} className="animate-spin" /> : "Cancel"}
+                            </button>
+                          )}
+                          <Link
+                            href={`/profile/orders/${order.id}`}
+                            className="flex items-center gap-1 text-gold-500 hover:text-gold-400 text-xs font-utility font-semibold transition-colors"
+                          >
+                            View Details
+                            <ChevronRight size={14} />
+                          </Link>
+                        </div>
                       </div>
                     </motion.div>
                   ))}
