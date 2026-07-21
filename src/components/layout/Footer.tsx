@@ -38,8 +38,8 @@ const CATEGORIES = [
 const HELP_LINKS = [
   { href: "/profile/orders", label: "My Orders" },
   { href: "/track-order", label: "Track Order" },
-  { href: "/#faq", label: "FAQ" },
-  { href: "/#contact", label: "Contact Us" },
+  { href: "/faq", label: "FAQ" },
+  { href: "/contact", label: "Contact Us" },
   { href: "/privacy-policy", label: "Privacy Policy" },
   { href: "/terms-and-conditions", label: "Terms & Conditions" },
   { href: "/return-policy", label: "Return Policy" },
