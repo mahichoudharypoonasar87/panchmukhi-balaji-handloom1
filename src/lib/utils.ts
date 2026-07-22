@@ -212,6 +212,7 @@ export const ORDER_STATUSES = [
   { value: "shipped", label: "Shipped", color: "bg-purple-500" },
   { value: "out_for_delivery", label: "Out for Delivery", color: "bg-orange-500" },
   { value: "delivered", label: "Delivered", color: "bg-green-500" },
+  { value: "return_requested", label: "Return Requested", color: "bg-pink-500" },
   { value: "cancelled", label: "Cancelled", color: "bg-red-500" },
   { value: "refunded", label: "Refunded", color: "bg-gray-500" },
 ];
