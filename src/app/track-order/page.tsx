@@ -6,14 +6,14 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   Package, Phone, Search, CheckCircle, Truck, Clock,
-  XCircle, MapPin, Loader2, ShoppingBag
+  XCircle, MapPin, Loader2, ShoppingBag, RefreshCw
 } from "lucide-react";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { trackOrder } from "@/lib/firebase/firestore";
 import { trackOrderSchema, TrackOrderFormData } from "@/lib/validations";
 import { Order } from "@/types";
-import { formatCurrency, formatDateTime, ORDER_STATUSES, cn } from "@/lib/utils";
+import { formatCurrency, formatDateTime, getOrderStatusColor, getOrderStatusLabel, cn } from "@/lib/utils";
 import toast from "react-hot-toast";
 
 const STATUS_FLOW = [
@@ -53,8 +53,16 @@ export default function TrackOrderPage() {
     }
   };
 
+  const isCancelled = order?.status === "cancelled";
+  const isPostDelivery = order?.status === "return_requested" || order?.status === "refunded";
+
+  // A returned/refunded order already passed through every earlier step,
+  // so the progress bar treats it as fully completed and a separate
+  // banner underneath explains the return/refund state.
   const currentStatusIndex = order
-    ? STATUS_FLOW.indexOf(order.status)
+    ? isPostDelivery
+      ? STATUS_FLOW.length - 1
+      : STATUS_FLOW.indexOf(order.status)
     : -1;
 
   return (
@@ -166,12 +174,10 @@ export default function TrackOrderPage() {
                     <span
                       className={cn(
                         "px-4 py-1.5 rounded-full text-xs font-utility font-bold text-white",
-                        order.status === "delivered" && "bg-green-500",
-                        order.status === "cancelled" && "bg-crimson-600",
-                        !["delivered", "cancelled"].includes(order.status) && "bg-gold-500 text-ebony"
+                        getOrderStatusColor(order.status)
                       )}
                     >
-                      {order.status.replace(/_/g, " ").toUpperCase()}
+                      {getOrderStatusLabel(order.status).toUpperCase()}
                     </span>
                   </div>
 
@@ -192,7 +198,7 @@ export default function TrackOrderPage() {
                 </div>
 
                 {/* Timeline */}
-                {order.status !== "cancelled" ? (
+                {!isCancelled && (
                   <div className="p-6 rounded-3xl bg-[var(--card-bg)] border border-[var(--border)]">
                     <h3 className="font-display text-lg font-bold text-[var(--foreground)] mb-6">
                       Order Status
@@ -201,7 +207,7 @@ export default function TrackOrderPage() {
                       {STATUS_FLOW.map((status, i) => {
                         const Icon = STATUS_ICONS[status];
                         const isCompleted = i <= currentStatusIndex;
-                        const isCurrent = i === currentStatusIndex;
+                        const isCurrent = i === currentStatusIndex && !isPostDelivery;
                         return (
                           <div key={status} className="flex gap-4 pb-8 last:pb-0 relative">
                             {i < STATUS_FLOW.length - 1 && (
@@ -245,7 +251,38 @@ export default function TrackOrderPage() {
                       })}
                     </div>
                   </div>
-                ) : (
+                )}
+
+                {isPostDelivery && (
+                  <div
+                    className={cn(
+                      "p-6 rounded-3xl border text-center",
+                      order.status === "refunded"
+                        ? "bg-gray-500/10 border-gray-500/30"
+                        : "bg-gold-500/5 border-gold-500/30"
+                    )}
+                  >
+                    {order.status === "refunded" ? (
+                      <>
+                        <CheckCircle size={32} className="text-gray-400 mx-auto mb-2" />
+                        <p className="text-gray-300 font-body font-semibold">Order Refunded</p>
+                        <p className="text-[var(--muted)] text-sm font-utility mt-1">
+                          Please allow a few business days for it to reflect in your account.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw size={32} className="text-gold-500 mx-auto mb-2" />
+                        <p className="text-gold-500 font-body font-semibold">Return/Refund Requested</p>
+                        <p className="text-[var(--muted)] text-sm font-utility mt-1">
+                          We&apos;re reviewing your request and will reach out shortly.
+                        </p>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {isCancelled && (
                   <div className="p-6 rounded-3xl bg-crimson-900/10 border border-crimson-900/30 text-center">
                     <XCircle size={32} className="text-crimson-400 mx-auto mb-2" />
                     <p className="text-crimson-400 font-body font-semibold">Order Cancelled</p>
