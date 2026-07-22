@@ -5,12 +5,12 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
   Package, MapPin, CreditCard, ArrowLeft, CheckCircle,
-  Truck, MessageCircle, Ban, Loader2
+  Truck, MessageCircle, Ban, RefreshCw, Loader2
 } from "lucide-react";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
-import { getOrderById, cancelOrderByCustomer } from "@/lib/firebase/firestore";
+import { getOrderById, cancelOrderByCustomer, requestOrderReturn } from "@/lib/firebase/firestore";
 import { Order } from "@/types";
 import { formatCurrency, formatDateTime, getOrderStatusColor, getOrderStatusLabel, cn } from "@/lib/utils";
 import toast from "react-hot-toast";
@@ -19,9 +19,16 @@ function OrderDetailContent() {
   const params = useParams();
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
+
   const [showCancelForm, setShowCancelForm] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
+
+  const [showRefundForm, setShowRefundForm] = useState(false);
+  const [refundReason, setRefundReason] = useState("");
+  const [refundError, setRefundError] = useState("");
+  const [requestingRefund, setRequestingRefund] = useState(false);
+
   const whatsappNumber = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || "91XXXXXXXXXX";
 
   useEffect(() => {
@@ -79,6 +86,41 @@ function OrderDetailContent() {
       setCancelling(false);
     }
   };
+
+  const handleRequestRefund = async () => {
+    const trimmed = refundReason.trim();
+    if (trimmed.length < 10) {
+      setRefundError("Please add a bit more detail (at least 10 characters) so we can help faster.");
+      return;
+    }
+    setRefundError("");
+    setRequestingRefund(true);
+    try {
+      await requestOrderReturn(order.id, trimmed);
+      setOrder((prev) =>
+        prev ? { ...prev, status: "return_requested", refundReason: trimmed } : prev
+      );
+      toast.success("Return/refund request submitted!");
+      setShowRefundForm(false);
+      setRefundReason("");
+    } catch (err) {
+      console.error(err);
+      const msg = err instanceof Error ? err.message : "Failed to submit request. Please try again.";
+      toast.error(msg);
+    } finally {
+      setRequestingRefund(false);
+    }
+  };
+
+  // Work out the 7-day return window from the "delivered" timeline entry.
+  const deliveredEntry = order.timeline?.find((t) => t.status === "delivered");
+  const deliveredAt = deliveredEntry ? new Date(deliveredEntry.timestamp) : null;
+  const daysSinceDelivery =
+    deliveredAt !== null ? (Date.now() - deliveredAt.getTime()) / (1000 * 60 * 60 * 24) : null;
+  const canRequestReturn =
+    order.status === "delivered" && daysSinceDelivery !== null && daysSinceDelivery <= 7;
+  const returnWindowClosed =
+    order.status === "delivered" && daysSinceDelivery !== null && daysSinceDelivery > 7;
 
   return (
     <>
@@ -163,6 +205,105 @@ function OrderDetailContent() {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Request Refund/Return — only within 7 days of delivery,
+              matching the window described on the Return Policy page. */}
+          {canRequestReturn && (
+            <div className="mb-6 p-5 rounded-3xl bg-[var(--card-bg)] border border-gold-500/30">
+              {!showRefundForm ? (
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <div>
+                    <p className="text-[var(--foreground)] font-body font-semibold text-sm">
+                      Not happy with this order?
+                    </p>
+                    <p className="text-[var(--muted)] text-xs font-utility mt-0.5">
+                      You can request a return or refund within 7 days of delivery.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowRefundForm(true)}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-gold-500/40 text-gold-500 hover:bg-gold-500/10 text-xs font-utility font-semibold transition-all flex-shrink-0"
+                  >
+                    <RefreshCw size={14} />
+                    Request Refund / Return
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-[var(--foreground)] font-body font-semibold text-sm mb-1">
+                    Request Refund / Return
+                  </p>
+                  <p className="text-[var(--muted)] text-xs font-utility mb-3">
+                    Tell us what went wrong — our team will review and get back to you.
+                  </p>
+                  <textarea
+                    value={refundReason}
+                    onChange={(e) => setRefundReason(e.target.value)}
+                    placeholder="e.g. Received wrong size, product damaged in transit..."
+                    rows={3}
+                    className="input-luxury resize-none text-sm mb-1"
+                  />
+                  {refundError && (
+                    <p className="text-crimson-400 text-xs mb-2">{refundError}</p>
+                  )}
+                  <div className="flex gap-3 mt-2">
+                    <button
+                      onClick={handleRequestRefund}
+                      disabled={requestingRefund}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gold-500 hover:bg-gold-400 text-ebony text-xs font-utility font-bold transition-all"
+                    >
+                      {requestingRefund ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                      Submit Request
+                    </button>
+                    <button
+                      onClick={() => { setShowRefundForm(false); setRefundReason(""); setRefundError(""); }}
+                      disabled={requestingRefund}
+                      className="px-4 py-2.5 rounded-xl border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] text-xs font-utility font-semibold transition-all"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {returnWindowClosed && (
+            <div className="mb-6 p-4 rounded-2xl bg-[var(--card-bg)] border border-[var(--border)]">
+              <p className="text-[var(--muted)] text-xs font-utility">
+                The 7-day return window for this order has closed. Need help anyway? Use the WhatsApp support button below.
+              </p>
+            </div>
+          )}
+
+          {order.status === "return_requested" && (
+            <div className="mb-6 p-5 rounded-3xl bg-gold-500/5 border border-gold-500/30 text-center">
+              <RefreshCw size={28} className="text-gold-500 mx-auto mb-2" />
+              <p className="text-[var(--foreground)] font-body font-semibold text-sm">
+                Return/Refund Requested
+              </p>
+              <p className="text-[var(--muted)] text-xs font-utility mt-1">
+                We&apos;re reviewing your request and will reach out shortly.
+              </p>
+              {order.refundReason && (
+                <p className="text-[var(--muted)] text-xs font-body mt-2 italic">
+                  &quot;{order.refundReason}&quot;
+                </p>
+              )}
+            </div>
+          )}
+
+          {order.status === "refunded" && (
+            <div className="mb-6 p-5 rounded-3xl bg-gray-500/10 border border-gray-500/30 text-center">
+              <CheckCircle size={28} className="text-gray-400 mx-auto mb-2" />
+              <p className="text-[var(--foreground)] font-body font-semibold text-sm">
+                Order Refunded
+              </p>
+              <p className="text-[var(--muted)] text-xs font-utility mt-1">
+                This order has been refunded. Please allow a few business days for it to reflect in your account.
+              </p>
             </div>
           )}
 
