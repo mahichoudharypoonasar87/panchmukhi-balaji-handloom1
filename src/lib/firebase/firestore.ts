@@ -17,6 +17,7 @@ import {
   increment,
   arrayUnion,
   arrayRemove,
+  getCountFromServer,
   DocumentSnapshot,
   QueryConstraint,
   Timestamp,
@@ -604,8 +605,8 @@ export const applyCoupon = async (
 
 /**
  * Coupons currently valid for a customer to use — active, within date
- * range, and under their usage limit. Used to show "Available Offers"
- * on the cart page and to power the homepage offer banner.
+ * range, and under their usage limit. Powers "Available Offers" on the
+ * cart page and the homepage offer banner.
  */
 export const getActiveCoupons = async (): Promise<Coupon[]> => {
   try {
@@ -755,8 +756,7 @@ export const updateOrderStatus = async (
 /**
  * Customer self-service cancellation. Deliberately narrower than
  * updateOrderStatus: only works while the order is still "pending",
- * matching what firestore.rules allows a non-admin owner to do, and it
- * writes cancelReason so Track Order can display it.
+ * matching what firestore.rules allows a non-admin owner to do.
  */
 export const cancelOrderByCustomer = async (
   orderId: string,
@@ -781,6 +781,55 @@ export const cancelOrderByCustomer = async (
   await updateDoc(doc(db, "orders", orderId), {
     status: "cancelled",
     cancelReason: finalReason,
+    timeline: [...(existing.timeline || []), timelineEntry],
+    updatedAt: serverTimestamp(),
+  });
+};
+
+/**
+ * Customer self-service refund/return request. Only allowed from
+ * "delivered", and only within 7 days of the delivered timeline entry —
+ * matching what firestore.rules allows and what the Return Policy page
+ * promises. Admin then reviews it and sets status to "refunded" (approved)
+ * or back to "delivered" (declined) from the Admin Orders panel.
+ */
+export const requestOrderReturn = async (
+  orderId: string,
+  reason: string
+): Promise<void> => {
+  const snap = await getDoc(doc(db, "orders", orderId));
+  if (!snap.exists()) throw new Error("Order not found");
+
+  const existing = snap.data() as Order;
+  if (existing.status !== "delivered") {
+    throw new Error("Only delivered orders can have a return/refund requested");
+  }
+
+  const deliveredEntry = existing.timeline?.find((t) => t.status === "delivered");
+  let deliveredAt: Date;
+  if (deliveredEntry?.timestamp) {
+    deliveredAt = new Date(deliveredEntry.timestamp as unknown as string);
+  } else if (existing.updatedAt instanceof Timestamp) {
+    deliveredAt = existing.updatedAt.toDate();
+  } else {
+    deliveredAt = new Date();
+  }
+
+  const daysSinceDelivery = (Date.now() - deliveredAt.getTime()) / (1000 * 60 * 60 * 24);
+  if (daysSinceDelivery > 7) {
+    throw new Error("The 7-day return window for this order has passed");
+  }
+
+  const timelineEntry: Record<string, unknown> = {
+    status: "return_requested",
+    timestamp: new Date().toISOString(),
+    note: reason,
+    updatedBy: "customer",
+  };
+
+  await updateDoc(doc(db, "orders", orderId), {
+    status: "return_requested",
+    refundReason: reason,
     timeline: [...(existing.timeline || []), timelineEntry],
     updatedAt: serverTimestamp(),
   });
@@ -923,8 +972,6 @@ export const createReview = async (
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  // Rating aggregate is recalculated once the review is approved —
-  // see updateReviewApproval / recalculateProductRating.
   return ref.id;
 };
 
@@ -1000,9 +1047,10 @@ export const markNotificationRead = async (id: string): Promise<void> => {
 // ─────────────────────────────────────────────────────────────────────────────
 export const getDashboardStats = async () => {
   try {
-    const [ordersSnap, usersSnap] = await Promise.all([
+    const [ordersSnap, usersSnap, productsCountSnap] = await Promise.all([
       getDocs(collection(db, "orders")),
       getDocs(collection(db, "users")),
+      getCountFromServer(collection(db, "products")),
     ]);
 
     const orders = ordersSnap.docs.map((d) => {
@@ -1021,13 +1069,14 @@ export const getDashboardStats = async () => {
     return {
       totalUsers: usersSnap.size,
       totalOrders: orders.length,
+      totalProducts: productsCountSnap.data().count,
       totalRevenue: orders
-        .filter((o) => o.status !== "cancelled")
+        .filter((o) => o.status !== "cancelled" && o.status !== "refunded")
         .reduce((s, o) => s + (o.total || 0), 0),
       todaySales: orders
         .filter(
           (o) =>
-            new Date(o.createdAt) >= today && o.status !== "cancelled"
+            new Date(o.createdAt) >= today && o.status !== "cancelled" && o.status !== "refunded"
         )
         .reduce((s, o) => s + (o.total || 0), 0),
       pendingOrders:   orders.filter((o) => o.status === "pending").length,
@@ -1043,7 +1092,7 @@ export const getDashboardStats = async () => {
   } catch (err) {
     console.error("[getDashboardStats] error:", err);
     return {
-      totalUsers: 0, totalOrders: 0, totalRevenue: 0, todaySales: 0,
+      totalUsers: 0, totalOrders: 0, totalProducts: 0, totalRevenue: 0, todaySales: 0,
       pendingOrders: 0, cancelledOrders: 0, deliveredOrders: 0,
       recentOrders: [],
     };
