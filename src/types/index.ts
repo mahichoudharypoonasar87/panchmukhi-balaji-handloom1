@@ -169,6 +169,7 @@ export type OrderStatus =
   | "shipped"
   | "out_for_delivery"
   | "delivered"
+  | "return_requested"
   | "cancelled"
   | "refunded";
 
@@ -227,6 +228,7 @@ export interface Order {
   trackingNumber?: string;
   timeline: OrderTimeline[];
   cancelReason?: string;
+  refundReason?: string;
   isReviewed: boolean;
   createdAt: Date;
   updatedAt: Date;
