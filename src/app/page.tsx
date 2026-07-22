@@ -3,6 +3,7 @@ import { Metadata } from "next";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import HeroSection from "@/components/home/HeroSection";
+import HeroBannerCarousel from "@/components/home/HeroBannerCarousel";
 import FeaturedCategories from "@/components/home/FeaturedCategories";
 import TrendingProducts from "@/components/home/TrendingProducts";
 import OfferBanner from "@/components/home/OfferBanner";
@@ -19,8 +20,28 @@ export const metadata: Metadata = {
 // Revalidate every 5 minutes via ISR (avoids build-time Firebase calls failing)
 export const revalidate = 300;
 
+async function HeroBannerSection() {
+  // Lazy-import so Firebase is never bundled into build-time static code.
+  const { getBanners } = await import("@/lib/firebase/firestore");
+  const heroBanners = await getBanners("hero").catch(() => []);
+
+  // Real admin-uploaded "hero" banners take over the top slot; if none
+  // exist yet, fall back to the static hero design.
+  if (heroBanners.length > 0) {
+    return <HeroBannerCarousel banners={heroBanners} />;
+  }
+  return <HeroSection />;
+}
+
+function HeroSkeleton() {
+  return (
+    <div className="relative min-h-[60vh] bg-hero-pattern flex items-center justify-center">
+      <div className="w-10 h-10 border-2 border-gold-500/30 border-t-gold-500 rounded-full animate-spin" />
+    </div>
+  );
+}
+
 async function HomeContent() {
-  // Lazy-import Firebase functions so they're never bundled in build-time static code
   const { getCategories, getTrendingProducts, getBestSellers, getFeaturedProducts } =
     await import("@/lib/firebase/firestore");
 
@@ -69,7 +90,9 @@ export default function HomePage() {
     <>
       <Navbar />
       <main>
-        <HeroSection />
+        <Suspense fallback={<HeroSkeleton />}>
+          <HeroBannerSection />
+        </Suspense>
         <Suspense fallback={<HomeSkeleton />}>
           <HomeContent />
         </Suspense>
