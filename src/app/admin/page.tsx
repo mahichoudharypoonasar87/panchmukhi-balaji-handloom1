@@ -16,6 +16,7 @@ import { Loader2 } from "lucide-react";
 interface Stats {
   totalUsers: number;
   totalOrders: number;
+  totalProducts: number;
   totalRevenue: number;
   todaySales: number;
   pendingOrders: number;
@@ -101,7 +102,7 @@ export default function AdminDashboard() {
         />
         <StatCard
           title="Total Products"
-          value="—"
+          value={stats?.totalProducts ?? 0}
           icon={Package}
           color="blue"
         />
