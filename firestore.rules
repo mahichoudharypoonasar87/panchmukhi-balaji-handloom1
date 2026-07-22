@@ -43,7 +43,13 @@ service cloud.firestore {
       allow update: if isAdmin()
                     || (isOwner(resource.data.userId)
                         && resource.data.status == 'pending'
-                        && request.resource.data.status == 'cancelled');
+                        && request.resource.data.status == 'cancelled')
+                    // Self-service refund/return request — only from
+                    // "delivered", one-way, matching the 7-day return
+                    // window enforced in requestOrderReturn().
+                    || (isOwner(resource.data.userId)
+                        && resource.data.status == 'delivered'
+                        && request.resource.data.status == 'return_requested');
       allow delete: if isAdmin();
     }
 
@@ -61,8 +67,6 @@ service cloud.firestore {
     }
 
     match /coupons/{couponId} {
-      // Public read — coupon codes are meant to be seen/shared, no PII here.
-      // Needed so the homepage offer banner works for guests too.
       allow read:  if true;
       allow write: if isAdmin();
     }
