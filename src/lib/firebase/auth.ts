@@ -13,7 +13,7 @@ import {
   UserCredential,
 } from "firebase/auth";
 import { doc, setDoc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
-import { auth, db } from "./config";
+import { auth, db, getFirebaseAuth } from "./config";
 import { UserProfile } from "@/types";
 
 const googleProvider = new GoogleAuthProvider();
@@ -53,19 +53,18 @@ export const loginWithEmail = async (
 // GOOGLE LOGIN
 // =============================================
 /**
- * FIX: switched from signInWithPopup to signInWithRedirect.
- *
- * Popups are unreliable on mobile browsers — silently blocked, or fail in
- * PWA/webview contexts — which is why "Continue with Google" wasn't doing
- * anything on phones. A full-page redirect works everywhere: desktop,
- * mobile, and installed PWA.
- *
- * This navigates the browser away immediately — nothing after the call
- * site runs. See getGoogleRedirectResult() for handling what happens once
- * the browser lands back on the app.
+ * FIX: uses getFirebaseAuth() directly instead of the lazy `auth` Proxy
+ * export. The Proxy exists purely to defer calling getAuth(app) until
+ * runtime (see config.ts) and forwards property reads to the real Auth
+ * instance — fine for simple calls, but signInWithRedirect/getRedirectResult
+ * are unusually stateful (persistence keys, pending-redirect tracking tied
+ * to the specific Auth instance). Calling a method via the Proxy can bind
+ * `this` to the Proxy instead of the real object for this kind of flow.
+ * getFirebaseAuth() returns the actual singleton directly — same instance,
+ * no indirection risk. Safe regardless of whether this was the root cause.
  */
 export const loginWithGoogle = async (): Promise<void> => {
-  await signInWithRedirect(auth, googleProvider);
+  await signInWithRedirect(getFirebaseAuth(), googleProvider);
 };
 
 /**
@@ -74,7 +73,7 @@ export const loginWithGoogle = async (): Promise<void> => {
  * redirect — only throws for a genuinely failed sign-in attempt.
  */
 export const getGoogleRedirectResult = async (): Promise<UserCredential | null> => {
-  return getRedirectResult(auth);
+  return getRedirectResult(getFirebaseAuth());
 };
 
 // =============================================
@@ -122,8 +121,6 @@ export const createUserProfile = async (
     updatedAt: new Date(),
     lastLoginAt: new Date(),
     ...additionalData,
-    // Always false on self-registration — matches firestore.rules, which
-    // rejects any create where isAdmin isn't explicitly false.
     isAdmin: false,
   };
 
