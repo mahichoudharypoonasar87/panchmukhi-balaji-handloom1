@@ -15,8 +15,6 @@ export default function GoogleRedirectHandler() {
 
     getGoogleRedirectResult()
       .then((result) => {
-        // null on a normal page load — only non-null right after a
-        // completed Google redirect sign-in.
         if (result?.user) {
           toast.success(`Welcome, ${result.user.displayName || "back"}!`);
           router.push("/");
@@ -24,10 +22,19 @@ export default function GoogleRedirectHandler() {
       })
       .catch((err: unknown) => {
         const code = (err as { code?: string })?.code;
+        const message = (err as { message?: string })?.message;
+
+        if (code === "auth/popup-closed-by-user") return;
+
+        console.error("Google redirect sign-in failed:", err);
+
         if (code === "auth/account-exists-with-different-credential") {
           toast.error("An account already exists with this email using a different sign-in method.");
-        } else if (code && code !== "auth/popup-closed-by-user") {
-          toast.error("Google sign-in failed. Please try again.");
+        } else if (code === "auth/unauthorized-domain") {
+          toast.error("This domain isn't authorized for Google sign-in yet.");
+        } else {
+          // Surface the real code/message instead of a generic string.
+          toast.error(code ? `Google sign-in failed (${code})` : message || "Google sign-in failed. Please try again.");
         }
       });
   }, [router]);
