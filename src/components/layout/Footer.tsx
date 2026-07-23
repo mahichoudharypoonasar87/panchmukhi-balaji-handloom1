@@ -50,6 +50,11 @@ export default function Footer() {
   const { settings } = useSiteSettings();
   const [categories, setCategories] = useState<Category[]>([]);
 
+  // FIX: this used to be six hardcoded category names ("dummy collections")
+  // shown regardless of whether they actually existed as real categories.
+  // A customer clicking one could land on an empty Shop page if that
+  // category was never created in Admin > Categories. Now it's pulled
+  // live from Firestore.
   useEffect(() => {
     getCategories()
       .then((cats) => setCategories(cats.slice(0, 6)))
@@ -124,7 +129,7 @@ export default function Footer() {
               {displayPhone && (
                 <div className="flex items-center gap-2">
                   <Phone size={14} className="text-gold-500 flex-shrink-0" />
-                  
+                  <a
                     href={`tel:+${displayPhone.replace(/\D/g, "")}`}
                     className="text-[#A08060] text-xs font-utility hover:text-gold-500 transition-colors"
                   >
@@ -134,7 +139,7 @@ export default function Footer() {
               )}
               <div className="flex items-center gap-2">
                 <Mail size={14} className="text-gold-500 flex-shrink-0" />
-                
+                <a
                   href={`mailto:${email}`}
                   className="text-[#A08060] text-xs font-utility hover:text-gold-500 transition-colors"
                 >
@@ -144,7 +149,7 @@ export default function Footer() {
             </div>
 
             <div className="flex items-center gap-3 mt-6">
-              
+              <a
                 href={`https://wa.me/${whatsappNumber}`}
                 target="_blank"
                 rel="noopener noreferrer"
@@ -154,7 +159,7 @@ export default function Footer() {
                 <MessageCircle size={14} className="text-green-400" />
               </a>
               {social?.facebook && (
-                
+                <a
                   href={social.facebook}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -165,7 +170,7 @@ export default function Footer() {
                 </a>
               )}
               {social?.instagram && (
-                
+                <a
                   href={social.instagram}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -176,7 +181,7 @@ export default function Footer() {
                 </a>
               )}
               {social?.twitter && (
-                
+                <a
                   href={social.twitter}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -187,7 +192,7 @@ export default function Footer() {
                 </a>
               )}
               {social?.youtube && (
-                
+                <a
                   href={social.youtube}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -262,7 +267,7 @@ export default function Footer() {
               ))}
             </ul>
 
-            
+            <a
               href={`https://wa.me/${whatsappNumber}?text=Hello! I have a query about your handloom products.`}
               target="_blank"
               rel="noopener noreferrer"
