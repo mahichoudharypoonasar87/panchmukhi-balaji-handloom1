@@ -788,10 +788,7 @@ export const cancelOrderByCustomer = async (
 
 /**
  * Customer self-service refund/return request. Only allowed from
- * "delivered", and only within 7 days of the delivered timeline entry —
- * matching what firestore.rules allows and what the Return Policy page
- * promises. Admin then reviews it and sets status to "refunded" (approved)
- * or back to "delivered" (declined) from the Admin Orders panel.
+ * "delivered", and only within 7 days of the delivered timeline entry.
  */
 export const requestOrderReturn = async (
   orderId: string,
@@ -887,19 +884,43 @@ export const removeFromWishlist = async (userId: string, productId: string): Pro
 // ─────────────────────────────────────────────────────────────────────────────
 // BANNERS
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Get active banners for the storefront, optionally filtered by type.
+ *
+ * FIX: previously this ran isActive + type as TWO equality filters plus an
+ * orderBy — that combination needs a Firestore composite index. If that
+ * index wasn't actually deployed (or was still building), the query threw,
+ * the catch block below swallowed it, and this silently returned []. That
+ * made the homepage banner disappear for EVERYONE — admin, logged-in
+ * customer, or guest — since this runs server-side and never depends on
+ * who's viewing the page. Login state was never actually the cause.
+ *
+ * Now it filters on isActive ONLY (a single equality filter is always
+ * covered by Firestore's automatic single-field index — no composite index
+ * needed, ever), and does the type-filter + order-sort in JavaScript
+ * instead, the same pattern getProducts() already uses for this exact
+ * reason.
+ */
 export const getBanners = async (type?: string): Promise<Banner[]> => {
   try {
-    const constraints: QueryConstraint[] = [
-      where("isActive", "==", true),
-      orderBy("order", "asc"),
-    ];
-    if (type) constraints.unshift(where("type", "==", type));
-    const snap = await getDocs(query(collection(db, "banners"), ...constraints));
-    return snap.docs.map((d) => ({
+    const snap = await getDocs(
+      query(collection(db, "banners"), where("isActive", "==", true))
+    );
+    let banners = snap.docs.map((d) => ({
       id: d.id,
       ...convertTimestamp(d.data() as Record<string, unknown>),
     })) as Banner[];
-  } catch {
+
+    if (type) {
+      banners = banners.filter((b) => b.type === type);
+    }
+
+    banners.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+    return banners;
+  } catch (err) {
+    console.error("[getBanners] failed:", err);
     return [];
   }
 };
