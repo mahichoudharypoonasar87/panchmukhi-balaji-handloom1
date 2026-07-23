@@ -43,17 +43,18 @@ export default function LoginPage() {
     setGoogleLoading(true);
     try {
       await loginWithGoogle();
-      // Browser navigates to Google here — nothing below this runs on success.
-      // GoogleRedirectHandler picks up the result once the browser returns.
-    } catch {
-      toast.error("Google login failed");
+      // Browser navigates to Google here on success — nothing below runs.
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code;
+      const message = (err as { message?: string })?.message;
+      console.error("Google sign-in redirect failed:", err);
+      toast.error(code ? `Google sign-in failed (${code})` : message || "Google login failed");
       setGoogleLoading(false);
     }
   };
 
   return (
     <div className="min-h-screen bg-hero-pattern flex items-center justify-center p-4">
-      {/* Background */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full bg-crimson-900/20 blur-3xl" />
         <div className="absolute bottom-1/4 right-1/4 w-80 h-80 rounded-full bg-gold-500/10 blur-3xl" />
@@ -65,7 +66,6 @@ export default function LoginPage() {
         transition={{ duration: 0.5 }}
         className="relative z-10 w-full max-w-md"
       >
-        {/* Logo */}
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex flex-col items-center gap-2">
             <div className="w-14 h-14 rounded-full bg-gold-500 flex items-center justify-center shadow-gold-glow">
@@ -82,7 +82,6 @@ export default function LoginPage() {
           </Link>
         </div>
 
-        {/* Card */}
         <div className="glass-dark rounded-4xl border border-white/10 p-8 shadow-luxury">
           <h1 className="font-display text-2xl font-bold text-ivory-100 text-center mb-1">
             Welcome Back
@@ -91,7 +90,6 @@ export default function LoginPage() {
             Sign in to your account to continue
           </p>
 
-          {/* Google Sign In */}
           <button
             onClick={handleGoogle}
             disabled={googleLoading}
@@ -110,14 +108,12 @@ export default function LoginPage() {
             Continue with Google
           </button>
 
-          {/* Divider */}
           <div className="flex items-center gap-3 mb-5">
             <div className="flex-1 h-px bg-white/10" />
             <span className="text-[#A08060] text-xs font-utility">or</span>
             <div className="flex-1 h-px bg-white/10" />
           </div>
 
-          {/* Email Form */}
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <div>
               <label className="text-ivory-200 text-xs font-utility font-semibold uppercase tracking-wide block mb-1.5">
