@@ -45,10 +45,12 @@ export default function RegisterPage() {
     setGoogleLoading(true);
     try {
       await loginWithGoogle();
-      // Browser navigates to Google here — GoogleRedirectHandler picks up
-      // the result once it returns.
-    } catch {
-      toast.error("Google sign-up failed");
+      // Browser navigates to Google here — nothing below runs on success.
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code;
+      const message = (err as { message?: string })?.message;
+      console.error("Google sign-up redirect failed:", err);
+      toast.error(code ? `Google sign-up failed (${code})` : message || "Google sign-up failed");
       setGoogleLoading(false);
     }
   };
