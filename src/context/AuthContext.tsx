@@ -9,7 +9,7 @@ import {
 } from "react";
 import { User } from "firebase/auth";
 import { auth } from "@/lib/firebase/config";
-import { getUserProfile } from "@/lib/firebase/auth";
+import { getUserProfile, createUserProfile } from "@/lib/firebase/auth";
 import { UserProfile } from "@/types";
 import { onAuthStateChanged } from "firebase/auth";
 
@@ -36,7 +36,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const fetchProfile = async (firebaseUser: User) => {
     try {
-      const profile = await getUserProfile(firebaseUser.uid);
+      let profile = await getUserProfile(firebaseUser.uid);
+      if (!profile) {
+        // A signed-in Firebase user with no Firestore profile yet — this
+        // is the normal state right after a first-time Google redirect
+        // sign-in completes (there's no earlier point to hook profile
+        // creation into, since control never returns to the button click
+        // handler). Create it now so the app never gets stuck with a
+        // logged-in user but no profile.
+        await createUserProfile(firebaseUser, {});
+        profile = await getUserProfile(firebaseUser.uid);
+      }
       setUserProfile(profile);
     } catch (error) {
       console.error("Error fetching user profile:", error);
