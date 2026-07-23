@@ -17,16 +17,14 @@ export const metadata: Metadata = {
     "Discover authentic Rajasthani handloom sarees, cotton fabrics, silk collections, and traditional Rajasthani textiles at Panchmukhi Balaji Handloom, Poonasar.",
 };
 
-// Revalidate every 5 minutes via ISR (avoids build-time Firebase calls failing)
-export const revalidate = 300;
+// Revalidate every 60s via ISR — short enough that a new/updated banner
+// shows up quickly, long enough to avoid hammering Firestore on every hit.
+export const revalidate = 60;
 
 async function HeroBannerSection() {
-  // Lazy-import so Firebase is never bundled into build-time static code.
   const { getBanners } = await import("@/lib/firebase/firestore");
   const heroBanners = await getBanners("hero").catch(() => []);
 
-  // Real admin-uploaded "hero" banners take over the top slot; if none
-  // exist yet, fall back to the static hero design.
   if (heroBanners.length > 0) {
     return <HeroBannerCarousel banners={heroBanners} />;
   }
