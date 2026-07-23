@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useState, useEffect } from "react";
 import {
   Phone,
   Mail,
@@ -17,6 +18,8 @@ import {
   Award,
 } from "lucide-react";
 import { useSiteSettings } from "@/context/SiteSettingsContext";
+import { getCategories } from "@/lib/firebase/firestore";
+import { Category } from "@/types";
 
 const QUICK_LINKS = [
   { href: "/", label: "Home" },
@@ -24,15 +27,6 @@ const QUICK_LINKS = [
   { href: "/shop?featured=true", label: "New Arrivals" },
   { href: "/shop?bestseller=true", label: "Best Sellers" },
   { href: "/track-order", label: "Track Order" },
-];
-
-const CATEGORIES = [
-  { href: "/shop?category=sarees", label: "Handloom Sarees" },
-  { href: "/shop?category=cotton", label: "Cotton Fabrics" },
-  { href: "/shop?category=silk", label: "Silk Collection" },
-  { href: "/shop?category=dupattas", label: "Dupattas" },
-  { href: "/shop?category=dress-materials", label: "Dress Materials" },
-  { href: "/shop?category=stoles", label: "Stoles & Scarves" },
 ];
 
 const HELP_LINKS = [
@@ -54,6 +48,18 @@ const FEATURES = [
 
 export default function Footer() {
   const { settings } = useSiteSettings();
+  const [categories, setCategories] = useState<Category[]>([]);
+
+  // FIX: this used to be six hardcoded category names ("dummy collections")
+  // shown regardless of whether they actually existed as real categories.
+  // A customer clicking one could land on an empty Shop page if that
+  // category was never created in Admin > Categories. Now it's pulled
+  // live from Firestore.
+  useEffect(() => {
+    getCategories()
+      .then((cats) => setCategories(cats.slice(0, 6)))
+      .catch(() => setCategories([]));
+  }, []);
 
   const whatsappNumber =
     settings?.whatsappNumber || process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || "91XXXXXXXXXX";
@@ -66,8 +72,8 @@ export default function Footer() {
       ? addressParts.join(", ") + (settings?.pincode ? ` - ${settings.pincode}` : "")
       : "Panchori Road, Poonasar, Rajasthan, India";
 
-  // Social links now come from the settings you save in /admin/settings.
   const social = settings?.socialLinks;
+  const hasCategories = categories.length > 0;
 
   return (
     <footer className="bg-footer-gradient border-t border-gold-500/20">
@@ -90,7 +96,12 @@ export default function Footer() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-12">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+        <div
+          className={`grid grid-cols-1 md:grid-cols-2 gap-8 ${
+            hasCategories ? "lg:grid-cols-4" : "lg:grid-cols-3"
+          }`}
+        >
+          {/* Brand */}
           <div className="lg:col-span-1">
             <Link href="/" className="flex items-center gap-2 mb-4">
               <div className="w-10 h-10 rounded-full bg-gold-500 flex items-center justify-center shadow-gold-glow">
@@ -118,7 +129,7 @@ export default function Footer() {
               {displayPhone && (
                 <div className="flex items-center gap-2">
                   <Phone size={14} className="text-gold-500 flex-shrink-0" />
-                  <a
+                  
                     href={`tel:+${displayPhone.replace(/\D/g, "")}`}
                     className="text-[#A08060] text-xs font-utility hover:text-gold-500 transition-colors"
                   >
@@ -128,7 +139,7 @@ export default function Footer() {
               )}
               <div className="flex items-center gap-2">
                 <Mail size={14} className="text-gold-500 flex-shrink-0" />
-                <a
+                
                   href={`mailto:${email}`}
                   className="text-[#A08060] text-xs font-utility hover:text-gold-500 transition-colors"
                 >
@@ -137,9 +148,8 @@ export default function Footer() {
               </div>
             </div>
 
-            {/* Social Links — now pulled from siteSettings.socialLinks instead of "#" */}
             <div className="flex items-center gap-3 mt-6">
-              <a
+              
                 href={`https://wa.me/${whatsappNumber}`}
                 target="_blank"
                 rel="noopener noreferrer"
@@ -149,7 +159,7 @@ export default function Footer() {
                 <MessageCircle size={14} className="text-green-400" />
               </a>
               {social?.facebook && (
-                <a
+                
                   href={social.facebook}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -160,7 +170,7 @@ export default function Footer() {
                 </a>
               )}
               {social?.instagram && (
-                <a
+                
                   href={social.instagram}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -171,7 +181,7 @@ export default function Footer() {
                 </a>
               )}
               {social?.twitter && (
-                <a
+                
                   href={social.twitter}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -182,7 +192,7 @@ export default function Footer() {
                 </a>
               )}
               {social?.youtube && (
-                <a
+                
                   href={social.youtube}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -195,6 +205,7 @@ export default function Footer() {
             </div>
           </div>
 
+          {/* Quick Links */}
           <div>
             <h3 className="font-utility text-xs tracking-widest uppercase text-gold-500 mb-4">
               Quick Links
@@ -214,25 +225,30 @@ export default function Footer() {
             </ul>
           </div>
 
-          <div>
-            <h3 className="font-utility text-xs tracking-widest uppercase text-gold-500 mb-4">
-              Collections
-            </h3>
-            <ul className="space-y-2">
-              {CATEGORIES.map((cat) => (
-                <li key={cat.href}>
-                  <Link
-                    href={cat.href}
-                    className="text-[#A08060] hover:text-gold-500 text-sm font-utility transition-colors flex items-center gap-1 group"
-                  >
-                    <span className="w-1.5 h-1.5 rounded-full bg-gold-500/50 group-hover:bg-gold-500 transition-colors" />
-                    {cat.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
+          {/* Collections — real categories only. Column is omitted entirely
+              if none exist yet, instead of showing fake ones. */}
+          {hasCategories && (
+            <div>
+              <h3 className="font-utility text-xs tracking-widest uppercase text-gold-500 mb-4">
+                Collections
+              </h3>
+              <ul className="space-y-2">
+                {categories.map((cat) => (
+                  <li key={cat.id}>
+                    <Link
+                      href={`/shop?category=${cat.slug || cat.id}`}
+                      className="text-[#A08060] hover:text-gold-500 text-sm font-utility transition-colors flex items-center gap-1 group"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-gold-500/50 group-hover:bg-gold-500 transition-colors" />
+                      {cat.name}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
+          {/* Help */}
           <div>
             <h3 className="font-utility text-xs tracking-widest uppercase text-gold-500 mb-4">
               Help & Support
@@ -251,7 +267,7 @@ export default function Footer() {
               ))}
             </ul>
 
-            <a
+            
               href={`https://wa.me/${whatsappNumber}?text=Hello! I have a query about your handloom products.`}
               target="_blank"
               rel="noopener noreferrer"
@@ -259,8 +275,12 @@ export default function Footer() {
             >
               <MessageCircle size={16} className="text-green-400" />
               <div>
-                <p className="text-green-400 text-xs font-utility font-semibold">Chat on WhatsApp</p>
-                <p className="text-[#A08060] text-xs font-utility">Quick response guaranteed</p>
+                <p className="text-green-400 text-xs font-utility font-semibold">
+                  Chat on WhatsApp
+                </p>
+                <p className="text-[#A08060] text-xs font-utility">
+                  Quick response guaranteed
+                </p>
               </div>
             </a>
           </div>
@@ -281,4 +301,4 @@ export default function Footer() {
       </div>
     </footer>
   );
-                          }
+}
