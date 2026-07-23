@@ -6,6 +6,7 @@ import { CartProvider } from "@/context/CartContext";
 import { WishlistProvider } from "@/context/WishlistContext";
 import { SiteSettingsProvider } from "@/context/SiteSettingsContext";
 import MaintenanceGate from "@/components/layout/MaintenanceGate";
+import GoogleRedirectHandler from "@/components/auth/GoogleRedirectHandler";
 import "@/styles/globals.css";
 
 export const metadata: Metadata = {
@@ -106,6 +107,7 @@ export default function RootLayout({
               <CartProvider>
                 <WishlistProvider>
                   <MaintenanceGate>{children}</MaintenanceGate>
+                  <GoogleRedirectHandler />
                   <Toaster
                     position="top-right"
                     toastOptions={{
