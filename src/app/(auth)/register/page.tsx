@@ -45,11 +45,10 @@ export default function RegisterPage() {
     setGoogleLoading(true);
     try {
       await loginWithGoogle();
-      toast.success("Account created!");
-      router.push("/");
+      // Browser navigates to Google here — GoogleRedirectHandler picks up
+      // the result once it returns.
     } catch {
       toast.error("Google sign-up failed");
-    } finally {
       setGoogleLoading(false);
     }
   };
