@@ -43,11 +43,10 @@ export default function LoginPage() {
     setGoogleLoading(true);
     try {
       await loginWithGoogle();
-      toast.success("Welcome!");
-      router.push("/");
+      // Browser navigates to Google here — nothing below this runs on success.
+      // GoogleRedirectHandler picks up the result once the browser returns.
     } catch {
       toast.error("Google login failed");
-    } finally {
       setGoogleLoading(false);
     }
   };
