@@ -1,7 +1,8 @@
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
-  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider,
   signOut,
   sendPasswordResetEmail,
@@ -27,13 +28,12 @@ export const registerWithEmail = async (
   displayName: string
 ): Promise<UserCredential> => {
   const credential = await createUserWithEmailAndPassword(auth, email, password);
-  
+
   await updateProfile(credential.user, { displayName });
   await sendEmailVerification(credential.user);
-  
-  // Create user profile in Firestore
+
   await createUserProfile(credential.user, { displayName });
-  
+
   return credential;
 };
 
@@ -52,18 +52,29 @@ export const loginWithEmail = async (
 // =============================================
 // GOOGLE LOGIN
 // =============================================
-export const loginWithGoogle = async (): Promise<UserCredential> => {
-  const credential = await signInWithPopup(auth, googleProvider);
-  
-  // Check if user exists, create if not
-  const userDoc = await getDoc(doc(db, "users", credential.user.uid));
-  if (!userDoc.exists()) {
-    await createUserProfile(credential.user, {});
-  } else {
-    await updateLastLogin(credential.user.uid);
-  }
-  
-  return credential;
+/**
+ * FIX: switched from signInWithPopup to signInWithRedirect.
+ *
+ * Popups are unreliable on mobile browsers — silently blocked, or fail in
+ * PWA/webview contexts — which is why "Continue with Google" wasn't doing
+ * anything on phones. A full-page redirect works everywhere: desktop,
+ * mobile, and installed PWA.
+ *
+ * This navigates the browser away immediately — nothing after the call
+ * site runs. See getGoogleRedirectResult() for handling what happens once
+ * the browser lands back on the app.
+ */
+export const loginWithGoogle = async (): Promise<void> => {
+  await signInWithRedirect(auth, googleProvider);
+};
+
+/**
+ * Call once, on app load, to pick up the result of a Google redirect
+ * sign-in. Resolves to null on a normal page load with no pending
+ * redirect — only throws for a genuinely failed sign-in attempt.
+ */
+export const getGoogleRedirectResult = async (): Promise<UserCredential | null> => {
+  return getRedirectResult(auth);
 };
 
 // =============================================
@@ -96,14 +107,11 @@ export const createUserProfile = async (
   user: User,
   additionalData: Partial<UserProfile>
 ): Promise<void> => {
-  const adminEmails = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || "").split(",").map(e => e.trim());
-  
   const userProfile: Omit<UserProfile, "uid"> = {
     email: user.email || "",
     displayName: user.displayName || additionalData.displayName || "",
     photoURL: user.photoURL || "",
     phone: "",
-    isAdmin: adminEmails.includes(user.email || ""),
     isEmailVerified: user.emailVerified,
     addresses: [],
     wishlist: [],
@@ -114,14 +122,21 @@ export const createUserProfile = async (
     updatedAt: new Date(),
     lastLoginAt: new Date(),
     ...additionalData,
+    // Always false on self-registration — matches firestore.rules, which
+    // rejects any create where isAdmin isn't explicitly false.
+    isAdmin: false,
   };
-  
-  await setDoc(doc(db, "users", user.uid), {
-    ...userProfile,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-    lastLoginAt: serverTimestamp(),
-  });
+
+  await setDoc(
+    doc(db, "users", user.uid),
+    {
+      ...userProfile,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      lastLoginAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
 };
 
 // =============================================
@@ -130,7 +145,7 @@ export const createUserProfile = async (
 export const getUserProfile = async (uid: string): Promise<UserProfile | null> => {
   const docRef = doc(db, "users", uid);
   const docSnap = await getDoc(docRef);
-  
+
   if (docSnap.exists()) {
     const data = docSnap.data();
     return {
@@ -141,7 +156,7 @@ export const getUserProfile = async (uid: string): Promise<UserProfile | null> =
       lastLoginAt: data.lastLoginAt?.toDate(),
     } as UserProfile;
   }
-  
+
   return null;
 };
 
@@ -157,7 +172,7 @@ export const updateUserProfile = async (
     ...data,
     updatedAt: serverTimestamp(),
   });
-  
+
   if (auth.currentUser && (data.displayName || data.photoURL)) {
     await updateProfile(auth.currentUser, {
       displayName: data.displayName,
