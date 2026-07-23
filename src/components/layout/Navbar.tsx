@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
@@ -26,25 +26,23 @@ import { useAuth } from "@/context/AuthContext";
 import { useCart } from "@/context/CartContext";
 import { useWishlist } from "@/context/WishlistContext";
 import { logout } from "@/lib/firebase/auth";
+import { getCategories } from "@/lib/firebase/firestore";
+import { Category } from "@/types";
 import { cn } from "@/lib/utils";
 import toast from "react-hot-toast";
 
-const NAV_LINKS = [
+const STATIC_NAV_LINKS = [
   { href: "/", label: "Home" },
   { href: "/shop", label: "Shop" },
-  {
-    href: "#",
-    label: "Collections",
-    children: [
-      { href: "/shop?category=sarees", label: "Sarees" },
-      { href: "/shop?category=cotton", label: "Cotton Fabrics" },
-      { href: "/shop?category=silk", label: "Silk Fabrics" },
-      { href: "/shop?category=dupattas", label: "Dupattas" },
-      { href: "/shop?category=dress-materials", label: "Dress Materials" },
-    ],
-  },
-  { href: "/track-order", label: "Track Order" },
 ];
+
+const TRAILING_NAV_LINKS = [{ href: "/track-order", label: "Track Order" }];
+
+interface NavLink {
+  href: string;
+  label: string;
+  children?: { href: string; label: string }[];
+}
 
 export default function Navbar() {
   const router = useRouter();
@@ -59,7 +57,34 @@ export default function Navbar() {
   const [searchQuery, setSearchQuery] = useState("");
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // FIX: "Collections" used to be five hardcoded category names shown
+  // regardless of what real categories exist. Now built from real
+  // Firestore data — the dropdown simply doesn't appear if no categories
+  // have been created yet in Admin > Categories.
+  useEffect(() => {
+    getCategories()
+      .then((cats) => setCategories(cats.slice(0, 8)))
+      .catch(() => setCategories([]));
+  }, []);
+
+  const navLinks: NavLink[] = useMemo(() => {
+    const links: NavLink[] = [...STATIC_NAV_LINKS];
+    if (categories.length > 0) {
+      links.push({
+        href: "/shop",
+        label: "Collections",
+        children: categories.map((cat) => ({
+          href: `/shop?category=${cat.slug || cat.id}`,
+          label: cat.name,
+        })),
+      });
+    }
+    links.push(...TRAILING_NAV_LINKS);
+    return links;
+  }, [categories]);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
@@ -77,6 +102,15 @@ export default function Navbar() {
     if (searchOpen) {
       searchRef.current?.focus();
     }
+  }, [searchOpen]);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSearchOpen(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [searchOpen]);
 
   const handleLogout = async () => {
@@ -110,7 +144,6 @@ export default function Navbar() {
       <nav className={navClass}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16 lg:h-20">
-            {/* Logo */}
             <Link
               href="/"
               className="flex items-center gap-2 group flex-shrink-0"
@@ -128,9 +161,8 @@ export default function Navbar() {
               </div>
             </Link>
 
-            {/* Desktop Nav Links */}
             <div className="hidden lg:flex items-center gap-6">
-              {NAV_LINKS.map((link) => (
+              {navLinks.map((link) => (
                 <div
                   key={link.label}
                   className="relative"
@@ -159,7 +191,6 @@ export default function Navbar() {
                     )}
                   </Link>
 
-                  {/* Dropdown */}
                   <AnimatePresence>
                     {link.children && activeDropdown === link.label && (
                       <motion.div
@@ -185,9 +216,7 @@ export default function Navbar() {
               ))}
             </div>
 
-            {/* Right Actions */}
             <div className="flex items-center gap-2 sm:gap-3">
-              {/* Search */}
               <button
                 onClick={() => setSearchOpen(true)}
                 className="p-2 rounded-full text-ivory-200 hover:text-gold-500 hover:bg-white/10 transition-all"
@@ -196,7 +225,6 @@ export default function Navbar() {
                 <Search size={20} />
               </button>
 
-              {/* Theme Toggle */}
               <button
                 onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
                 className="hidden sm:flex p-2 rounded-full text-ivory-200 hover:text-gold-500 hover:bg-white/10 transition-all"
@@ -205,7 +233,6 @@ export default function Navbar() {
                 {theme === "dark" ? <Sun size={20} /> : <Moon size={20} />}
               </button>
 
-              {/* Wishlist */}
               {user && (
                 <Link
                   href="/wishlist"
@@ -221,7 +248,6 @@ export default function Navbar() {
                 </Link>
               )}
 
-              {/* Cart */}
               <Link
                 href="/cart"
                 className="relative p-2 rounded-full text-ivory-200 hover:text-gold-500 hover:bg-white/10 transition-all"
@@ -239,7 +265,6 @@ export default function Navbar() {
                 )}
               </Link>
 
-              {/* User Menu */}
               {user ? (
                 <div className="relative">
                   <button
@@ -336,7 +361,6 @@ export default function Navbar() {
                 </Link>
               )}
 
-              {/* Mobile Menu Toggle */}
               <button
                 onClick={() => setMobileOpen(!mobileOpen)}
                 className="lg:hidden p-2 rounded-full text-ivory-200 hover:text-gold-500 hover:bg-white/10 transition-all"
@@ -348,7 +372,6 @@ export default function Navbar() {
           </div>
         </div>
 
-        {/* Mobile Menu */}
         <AnimatePresence>
           {mobileOpen && (
             <motion.div
@@ -358,7 +381,7 @@ export default function Navbar() {
               className="lg:hidden border-t border-gold-500/20 bg-[#0F0500]/98 backdrop-blur-xl"
             >
               <div className="px-4 py-4 space-y-1">
-                {NAV_LINKS.map((link) => (
+                {navLinks.map((link) => (
                   <div key={link.label}>
                     <Link
                       href={link.href}
@@ -403,7 +426,6 @@ export default function Navbar() {
         </AnimatePresence>
       </nav>
 
-      {/* Search Overlay */}
       <AnimatePresence>
         {searchOpen && (
           <motion.div
@@ -443,7 +465,6 @@ export default function Navbar() {
         )}
       </AnimatePresence>
 
-      {/* Click outside to close user menu */}
       {userMenuOpen && (
         <div
           className="fixed inset-0 z-40"
