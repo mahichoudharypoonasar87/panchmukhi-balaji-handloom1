@@ -50,11 +50,6 @@ export default function Footer() {
   const { settings } = useSiteSettings();
   const [categories, setCategories] = useState<Category[]>([]);
 
-  // FIX: this used to be six hardcoded category names ("dummy collections")
-  // shown regardless of whether they actually existed as real categories.
-  // A customer clicking one could land on an empty Shop page if that
-  // category was never created in Admin > Categories. Now it's pulled
-  // live from Firestore.
   useEffect(() => {
     getCategories()
       .then((cats) => setCategories(cats.slice(0, 6)))
