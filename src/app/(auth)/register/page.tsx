@@ -44,13 +44,23 @@ export default function RegisterPage() {
   const handleGoogle = async () => {
     setGoogleLoading(true);
     try {
-      await loginWithGoogle();
-      // Browser navigates to Google here — nothing below runs on success.
+      const result = await loginWithGoogle();
+      toast.success(`Welcome, ${result.user.displayName || "there"}!`);
+      router.push("/");
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code;
       const message = (err as { message?: string })?.message;
-      console.error("Google sign-up redirect failed:", err);
-      toast.error(code ? `Google sign-up failed (${code})` : message || "Google sign-up failed");
+      // The user closing the popup themselves isn't a real error.
+      if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") {
+        return;
+      }
+      console.error("Google sign-up failed:", err);
+      if (code === "auth/popup-blocked") {
+        toast.error("Your browser blocked the sign-in popup. Please allow popups for this site and try again.");
+      } else {
+        toast.error(code ? `Google sign-up failed (${code})` : message || "Google sign-up failed");
+      }
+    } finally {
       setGoogleLoading(false);
     }
   };
