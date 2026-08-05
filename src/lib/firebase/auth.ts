@@ -1,6 +1,7 @@
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  signInWithPopup,
   signInWithRedirect,
   getRedirectResult,
   GoogleAuthProvider,
@@ -53,24 +54,28 @@ export const loginWithEmail = async (
 // GOOGLE LOGIN
 // =============================================
 /**
- * FIX: uses getFirebaseAuth() directly instead of the lazy `auth` Proxy
- * export. The Proxy exists purely to defer calling getAuth(app) until
- * runtime (see config.ts) and forwards property reads to the real Auth
- * instance — fine for simple calls, but signInWithRedirect/getRedirectResult
- * are unusually stateful (persistence keys, pending-redirect tracking tied
- * to the specific Auth instance). Calling a method via the Proxy can bind
- * `this` to the Proxy instead of the real object for this kind of flow.
- * getFirebaseAuth() returns the actual singleton directly — same instance,
- * no indirection risk. Safe regardless of whether this was the root cause.
+ * FIX: switched from signInWithRedirect to signInWithPopup.
+ *
+ * The redirect flow sends the browser through
+ * https://<authDomain>.firebaseapp.com/__/auth/handler and back to the
+ * app. Because that handler lives on a different top-level domain than
+ * the app itself (vercel.app vs firebaseapp.com), completing that round
+ * trip depends on the browser preserving storage/cookies across the hop.
+ * Modern mobile browsers increasingly restrict third-party storage by
+ * default, which produces "The requested action is invalid" even when
+ * the domain is correctly authorized in Firebase — and this affects real
+ * visitors too, not just one device/browser. signInWithPopup keeps the
+ * whole flow in a popup window and resolves synchronously in the same
+ * tab, avoiding that cross-domain redirect entirely.
  */
-export const loginWithGoogle = async (): Promise<void> => {
-  await signInWithRedirect(getFirebaseAuth(), googleProvider);
+export const loginWithGoogle = async (): Promise<UserCredential> => {
+  return signInWithPopup(getFirebaseAuth(), googleProvider);
 };
 
 /**
- * Call once, on app load, to pick up the result of a Google redirect
- * sign-in. Resolves to null on a normal page load with no pending
- * redirect — only throws for a genuinely failed sign-in attempt.
+ * Kept for compatibility with GoogleRedirectHandler, which stays mounted
+ * but is now a harmless no-op (resolves to null — there's no pending
+ * redirect to pick up anymore).
  */
 export const getGoogleRedirectResult = async (): Promise<UserCredential | null> => {
   return getRedirectResult(getFirebaseAuth());
